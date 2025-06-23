@@ -1,15 +1,19 @@
 const axios = require('axios');
-let Service, Characteristic, Bridge, Accessory;
+let Service, Characteristic, Bridge, Accessory, uuid;
 
 module.exports = (api) => {
     Service = api.hap.Service;
     Characteristic = api.hap.Characteristic;
     Bridge = api.hap.Bridge;
     Accessory = api.platformAccessory;
+    uuid = api.hap.uuid;
+
+    // Register as dynamic (true) platform
     api.registerPlatform(
         'homebridge-smartthings-routine',
         'StRoutinePlatform',
-        StRoutinePlatform
+        StRoutinePlatform,
+        true
     );
 };
 
@@ -18,10 +22,23 @@ class StRoutinePlatform {
         this.log = log;
         this.config = config;
         this.api = api;
+        this.name = config.name;
+        this.routineId = config.routineId;
+        this.token = config.token;
 
-        // Create a new Bridge instance
-        const bridgeName = config.name;
-        const bridgeUUID = api.hap.uuid.generate(bridgeName);
+        if (!this.token || this.token.trim() === '') {
+            throw new Error('SmartThings API token is required in config');
+        }
+
+        // Delay publishing until Homebridge is fully launched
+        this.api.on('didFinishLaunching', () => {
+            this.publishBridge();
+        });
+    }
+
+    publishBridge() {
+        const bridgeName = this.name;
+        const bridgeUUID = uuid.generate(bridgeName);
         this.bridge = new Bridge(bridgeName, bridgeUUID);
 
         // Set Bridge information
@@ -30,51 +47,53 @@ class StRoutinePlatform {
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
             .setCharacteristic(Characteristic.Model, 'RoutineBridge');
 
-        // Publish as external Bridge to generate its own QR/pin
-        api.publishExternalAccessories(
+        // External Bridge publishing
+        this.api.publishExternalAccessories(
             'homebridge-smartthings-routine',
             [this.bridge]
         );
 
-        // Create the Routine accessory under this Bridge
-        const accUUID = api.hap.uuid.generate(`${bridgeName}-${config.routineId}`);
-        const accessory = new Accessory(config.name, accUUID);
-        accessory.category = api.hap.Categories.TV;
+        // Create Routine accessory under Bridge
+        const accUUID = uuid.generate(`${bridgeName}-${this.routineId}`);
+        const accessory = new Accessory(bridgeName, accUUID);
+        accessory.category = this.api.hap.Categories.TV;
 
         // TV-icon switch service
-        const service = new Service.Switch(config.name);
+        const service = new Service.Switch(this.name);
         service
             .getCharacteristic(Characteristic.On)
-            .onSet(async (value) => {
-                if (!value) return;
-                try {
-                    await axios.post(
-                        `https://api.smartthings.com/v1/scenes/${config.routineId}/execute`,
-                        {},
-                        { headers: { Authorization: `Bearer ${config.token}` } }
-                    );
-                    log.info(`[StRoutine] Executed routine ${config.name}`);
-                } catch (err) {
-                    log.error(`[StRoutine] Failed to execute routine ${config.name}`, err);
-                    throw new api.hap.HapStatusError(
-                        api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
-                    );
-                } finally {
-                    service.updateCharacteristic(Characteristic.On, false);
-                }
-            })
+            .onSet(this.handleOnSet.bind(this, service))
             .onGet(() => false);
 
         accessory.addService(service);
 
-        // Attach to Bridge
+        // Attach accessory to Bridge
         this.bridge.addBridgedAccessory(accessory);
 
-        log.info(`[StRoutinePlatform] Published Bridge & accessory: ${bridgeName}`);
+        this.log.info(`[StRoutinePlatform] Published Bridge & accessory: ${bridgeName}`);
     }
 
-    // Required for dynamic platforms
+    async handleOnSet(service, value) {
+        if (!value) return;
+        try {
+            await axios.post(
+                `https://api.smartthings.com/v1/scenes/${this.routineId}/execute`,
+                {},
+                { headers: { Authorization: `Bearer ${this.token}` } }
+            );
+            this.log.info(`[StRoutinePlatform] Executed routine ${this.name}`);
+        } catch (err) {
+            this.log.error(`[StRoutinePlatform] Failed to execute routine ${this.name}`, err);
+            throw new this.api.hap.HapStatusError(
+                this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
+            );
+        } finally {
+            // reset switch
+            service.updateCharacteristic(Characteristic.On, false);
+        }
+    }
+
     configureAccessory() {
-        // no-op
+        // no-op for dynamic platform
     }
 }

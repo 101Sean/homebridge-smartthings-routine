@@ -3,13 +3,17 @@
   "version": "1.0.2",
   "description": "Expose SmartThings Routine as a separate HomeKit Bridge with TV-icon switch",
   "main": "index.js",
+  "scripts": {
+    "start": "homebridge -I"
+  },
   "keywords": [
     "homebridge-plugin",
     "homekit",
     "smartthings",
     "routine",
     "tv",
-    "switch"
+    "switch",
+    "bridge"
   ],
   "engines": { "node": ">=14.17.0" },
   "dependencies": {

@@ -6,7 +6,8 @@
     "properties": {
       "name": {
         "type": "string",
-        "title": "Bridge Name"
+        "title": "Bridge Name",
+        "default": "SmartThings Routine Bridge"
       },
       "routineId": {
         "type": "string",
@@ -17,6 +18,6 @@
         "title": "SmartThings API Token"
       }
     },
-    "required": ["name","routineId","token"]
+    "required": ["name", "routineId", "token"]
   }
 }
