@@ -1,0 +1,35 @@
+{
+  "name": "homebridge-smartthings-routine",
+  "version": "1.0.0",
+  "description": "Expose SmartThings Routine as HomeKit TV-icon switch",
+  "main": "index.js",
+  "keywords": [
+    "homebridge-plugin",
+    "homekit",
+    "smartthings",
+    "routine",
+    "tv",
+    "switch"
+  ],
+  "engines": {
+    "node": ">=14.17.0"
+  },
+  "dependencies": {
+    "axios": "^1.4.0",
+    "hap-nodejs": "^1.2.0",
+    "net-snmp": "^3.23.0"
+  },
+  "peerDependencies": {
+    "homebridge": ">=1.5.0"
+  },
+  "homebridge": {
+    "accessories": [
+      {
+        "accessory": "StRoutine",
+        "name": "TV",
+        "routineId": "",
+        "token": ""
+      }
+    ]
+  }
+}

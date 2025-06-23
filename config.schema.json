@@ -1,0 +1,23 @@
+{
+  "pluginAlias": "homebridge-smartthings-routine",
+  "pluginType": "accessory",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "title": "Accessory Name"
+      },
+      "routineId": {
+        "type": "string",
+        "title": "SmartThings Routine ID"
+      },
+      "token": {
+        "type": "string",
+        "title": "SmartThings API Token",
+        "description": "Leave blank to use SMARTTHINGS_TOKEN env var"
+      }
+    },
+    "required": ["name","routineId"]
+  }
+}
