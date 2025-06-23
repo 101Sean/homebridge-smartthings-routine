@@ -54,7 +54,7 @@ class StRoutinePlatform {
 
         // 각 Scene → TV 액세서리로 추가
         scenes.forEach(scene => {
-            const accName = scene.name
+            const accName = (scene.name || '').trim() || `Routine ${scene.sceneId}`
             const accUUID = uuid.generate(scene.sceneId)
 
             const tvAcc = new Accessory(accName, accUUID)
