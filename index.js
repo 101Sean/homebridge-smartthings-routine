@@ -26,12 +26,12 @@ class TVRoutineAccessory {
             throw new Error('name, routineId, token are required')
         }
 
-        // 정보 서비스
+        // Accessory 정보 서비스
         this.infoService = new Service.AccessoryInformation()
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
             .setCharacteristic(Characteristic.Model,        'TVRoutineAccessory')
 
-        // TV 서비스: 오직 전원(Active)만
+        // TV 서비스: 오직 Active 특성만 구현
         this.tvService = new Service.Television(this.name)
         this.tvService
             .setCharacteristic(Characteristic.ConfiguredName, this.name)
@@ -39,17 +39,18 @@ class TVRoutineAccessory {
                 Characteristic.SleepDiscoveryMode,
                 Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
             )
-            .getCharacteristic(Characteristic.Active)
-            .on('get', this.handleGetActive.bind(this))
-            .on('set', this.handleSetActive.bind(this))
+
+        this.tvService.getCharacteristic(Characteristic.Active)
+            .onGet(this.handleGetActive.bind(this))
+            .onSet(this.handleSetActive.bind(this))
     }
 
-    handleGetActive(callback) {
-        // 항상 OFF로 보여줌 (토글 후 자동 리셋)
-        callback(null, Characteristic.Active.INACTIVE)
+    handleGetActive() {
+        // 항상 INACTIVE 로 반환 → 버튼처럼 동작
+        return Characteristic.Active.INACTIVE
     }
 
-    async handleSetActive(value, callback) {
+    async handleSetActive(value) {
         if (value === Characteristic.Active.ACTIVE) {
             try {
                 await axios.post(
@@ -60,16 +61,16 @@ class TVRoutineAccessory {
                 this.log.info(`Executed TV routine: ${this.name}`)
             } catch (err) {
                 this.log.error('Error executing TV routine', err)
-                return callback(new Error('SERVICE_COMMUNICATION_FAILURE'))
+                // HomeKit에 오류 상태 전파
+                throw new Error('SERVICE_COMMUNICATION_FAILURE')
             } finally {
-                // HomeKit 버튼 리셋
+                // 토글 후 즉시 INACTIVE 로 리셋
                 this.tvService.updateCharacteristic(
                     Characteristic.Active,
                     Characteristic.Active.INACTIVE
                 )
             }
         }
-        callback()
     }
 
     getServices() {

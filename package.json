@@ -1,3 +1,4 @@
+// package.json
 {
   "name":        "homebridge-smartthings-routine",
   "version":     "1.0.7",
