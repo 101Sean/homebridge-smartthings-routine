@@ -22,6 +22,7 @@ class StRoutinePlatform {
         this.name       = config.name;
         this.routineId  = config.routineId;
         this.token      = config.token;
+        this.switchName = config.switchName || 'Run Routine';
         this.api        = api;
 
         if (!this.name || !this.routineId || !this.token) {
@@ -46,7 +47,7 @@ class StRoutinePlatform {
         // Create a Switch accessory for the routine
         const switchUUID = uuid.generate(this.switchName);
         const switchAcc  = new Accessory(this.switchName, switchUUID);
-        switchAcc.category = this.api.hap.Categories.TELEVISION;
+        switchAcc.category = this.api.hap.Categories.SWITCH;
 
         const svc = new Service.Switch(this.switchName);
         svc
