@@ -1,4 +1,3 @@
-// index.js
 const axios = require('axios');
 let Service, Characteristic, Bridge, Accessory, uuid;
 
@@ -26,35 +25,42 @@ class StRoutinePlatform {
             throw new Error('name, routineId, token must be provided in config');
         }
 
+        // Delay until Homebridge fully launches
         this.api.on('didFinishLaunching', () => this.publish());
     }
 
     publish() {
         const name = this.name;
         const bridgeUUID = uuid.generate(name);
-        this.bridge = new Bridge(name, bridgeUUID);
 
-        this.bridge
+        // Create PlatformAccessory to act as VPN Bridge
+        const bridgeAccessory = new Accessory(name, bridgeUUID);
+        bridgeAccessory.category = this.api.hap.Categories.BRIDGE;
+        bridgeAccessory
             .getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
             .setCharacteristic(Characteristic.Model, 'RoutineBridge');
 
-        // publish external bridge
-        this.api.publishExternalAccessories('homebridge-smartthings-routine', [this.bridge]);
+        // Publish this accessory as an external Bridge
+        this.api.publishExternalAccessories('homebridge-smartthings-routine', [bridgeAccessory]);
 
-        // add routine switch under bridge
-        const accUUID = uuid.generate(`${name}-${this.routineId}`);
-        const accessory = new Accessory(name, accUUID);
-        accessory.category = this.api.hap.Categories.TV;
+        // Create child accessory under the Bridge
+        const childUUID = uuid.generate(`${name}-${this.routineId}`);
+        const childAccessory = new Accessory(name, childUUID);
+        childAccessory.category = this.api.hap.Categories.TV;
 
+        // Add TV-icon switch service
         const svc = new Service.Switch(name);
-        svc.getCharacteristic(Characteristic.On)
-            .onSet(async val => {
-                if (!val) return;
+        svc
+            .getCharacteristic(Characteristic.On)
+            .onSet(async (value) => {
+                if (!value) return;
                 try {
-                    await axios.post(`https://api.smartthings.com/v1/scenes/${this.routineId}/execute`, {}, {
-                        headers: { Authorization: `Bearer ${this.token}` }
-                    });
+                    await axios.post(
+                        `https://api.smartthings.com/v1/scenes/${this.routineId}/execute`,
+                        {},
+                        { headers: { Authorization: `Bearer ${this.token}` } }
+                    );
                     this.log.info(`Executed ${name}`);
                 } catch (e) {
                     this.log.error(`Error executing ${name}`, e);
@@ -64,9 +70,10 @@ class StRoutinePlatform {
                 }
             })
             .onGet(() => false);
+        childAccessory.addService(svc);
 
-        accessory.addService(svc);
-        this.bridge.addBridgedAccessory(accessory);
+        // Attach child to the published Bridge
+        bridgeAccessory.addBridgedAccessory(childAccessory);
         this.log.info(`Published Bridge and accessory: ${name}`);
     }
 
