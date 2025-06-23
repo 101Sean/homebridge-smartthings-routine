@@ -7,12 +7,12 @@ module.exports = (api) => {
     Service        = api.hap.Service
     Characteristic = api.hap.Characteristic
     Bridge         = api.hap.Bridge
-    Accessory      = api.hap.Accessory         // ← 변경: platformAccessory → hap.Accessory
+    Accessory      = api.platformAccessory
     uuid           = api.hap.uuid
 
     api.registerPlatform(
-        'homebridge-smartthings-routine',       // package.json name
-        'StRoutinePlatform',                    // platform identifier
+        'homebridge-smartthings-routine',
+        'StRoutinePlatform',
         StRoutinePlatform,
         true
     )
@@ -21,17 +21,15 @@ module.exports = (api) => {
 class StRoutinePlatform {
     constructor(log, config, api) {
         this.log   = log
-        this.name  = config.name       // Child Bridge 이름
-        this.token = config.token      // SmartThings API 토큰
+        this.name  = config.name
+        this.token = config.token
         this.api   = api
 
         if (!this.name || !this.token) {
             throw new Error('name, token are required')
         }
 
-        this.api.on('didFinishLaunching', () => {
-            this.initAccessories()
-        })
+        this.api.on('didFinishLaunching', this.initAccessories.bind(this))
     }
 
     async initAccessories() {
@@ -47,26 +45,24 @@ class StRoutinePlatform {
             return
         }
 
-        // 1) Child Bridge 생성
+        // child Bridge
         const bridgeUUID  = uuid.generate(this.name)
         const childBridge = new Bridge(this.name, bridgeUUID)
         childBridge.getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
             .setCharacteristic(Characteristic.Model,        'RoutineBridge')
 
-        // 2) 모든 Scene → TV 액세서리로 추가
+        // 각 Scene → TV 액세서리로 추가
         scenes.forEach(scene => {
-            // 빈 이름은 ID로 대체
-            const displayName = (scene.name || '').trim() || `Routine ${scene.sceneId}`
-            const accUUID     = uuid.generate(scene.sceneId)
+            const accName = scene.name
+            const accUUID = uuid.generate(scene.sceneId)
 
-            // 여기서 꼭 api.hap.Accessory 사용
-            const tvAcc = new Accessory(displayName, accUUID)
+            const tvAcc = new Accessory(accName, accUUID)
             tvAcc.category = this.api.hap.Categories.TELEVISION
 
-            const tvSvc = new Service.Television(displayName)
+            const tvSvc = new Service.Television(accName)
             tvSvc
-                .setCharacteristic(Characteristic.ConfiguredName, displayName)
+                .setCharacteristic(Characteristic.ConfiguredName, accName)
                 .setCharacteristic(
                     Characteristic.SleepDiscoveryMode,
                     Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
@@ -82,36 +78,29 @@ class StRoutinePlatform {
                                 {},
                                 { headers: { Authorization: `Bearer ${this.token}` } }
                             )
-                            this.log.info(`Executed scene: ${displayName}`)
+                            this.log.info(`Executed scene: ${accName}`)
                         } catch (err) {
-                            this.log.error(`Error executing ${displayName}`, err)
+                            this.log.error(`Error executing ${accName}`, err)
                             throw new this.api.hap.HapStatusError(
                                 this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
                             )
                         } finally {
-                            // 눌렀다 떼는 버튼처럼 리셋
-                            tvSvc.updateCharacteristic(
-                                Characteristic.Active,
-                                Characteristic.Active.INACTIVE
-                            )
+                            tvSvc.updateCharacteristic(Characteristic.Active, Characteristic.Active.INACTIVE)
                         }
                     }
                     cb()
                 })
 
             tvAcc.addService(tvSvc)
-            childBridge.addBridgedAccessory(tvAcc)   // ← 이제 에러 없이 동작합니다
+            childBridge.addBridgedAccessory(tvAcc)
         })
 
-        // 3) HomeKit에 Child Bridge로 게시
         this.api.publishExternalAccessories(
-            'homebridge-smartthings-routine',       // package.json name
-            [ childBridge ]
+            'homebridge-smartthings-routine',
+            [childBridge]
         )
-        this.log.info(
-            `Published child bridge "${this.name}" with ${scenes.length} TV routines`
-        )
+        this.log.info(`Published child bridge "${this.name}" with ${scenes.length} TV routines`)
     }
 
-    configureAccessory() {}  // no-op
+    configureAccessory() {}
 }
