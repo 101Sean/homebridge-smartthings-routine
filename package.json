@@ -20,8 +20,7 @@
         "platform": "StRoutinePlatform",
         "name": "Good Bridge",
         "routineId": "YOUR_SCENE_ID",
-        "token": "YOUR_TOKEN",
-        "switchName": "Run Routine"
+        "token": "YOUR_TOKEN"
       }
     ]
   }
