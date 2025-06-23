@@ -33,7 +33,7 @@ class StRoutinePlatform {
         const name = this.name;
         const bridgeUUID = uuid.generate(name);
 
-        // Create PlatformAccessory to act as VPN Bridge
+        // Create PlatformAccessory to act as external Bridge
         const bridgeAccessory = new Accessory(name, bridgeUUID);
         bridgeAccessory.category = this.api.hap.Categories.BRIDGE;
         bridgeAccessory
@@ -41,20 +41,16 @@ class StRoutinePlatform {
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
             .setCharacteristic(Characteristic.Model, 'RoutineBridge');
 
-        // Publish this accessory as an external Bridge
-        this.api.publishExternalAccessories('homebridge-smartthings-routine', [bridgeAccessory]);
-
         // Create child accessory under the Bridge
         const childUUID = uuid.generate(`${name}-${this.routineId}`);
         const childAccessory = new Accessory(name, childUUID);
         childAccessory.category = this.api.hap.Categories.TV;
 
-        // Add TV-icon switch service
         const svc = new Service.Switch(name);
         svc
             .getCharacteristic(Characteristic.On)
-            .onSet(async (value) => {
-                if (!value) return;
+            .onSet(async val => {
+                if (!val) return;
                 try {
                     await axios.post(
                         `https://api.smartthings.com/v1/scenes/${this.routineId}/execute`,
@@ -72,10 +68,30 @@ class StRoutinePlatform {
             .onGet(() => false);
         childAccessory.addService(svc);
 
-        // Attach child to the published Bridge
-        bridgeAccessory.addBridgedAccessory(childAccessory);
+        // Publish both as external accessories (Bridge + child)
+        this.api.publishExternalAccessories(
+            'homebridge-smartthings-routine',
+            [bridgeAccessory, childAccessory]
+        );
+
         this.log.info(`Published Bridge and accessory: ${name}`);
     }
+);
+    this.log.info(`Executed ${name}`);
+} catch (e) {
+this.log.error(`Error executing ${name}`, e);
+throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+} finally {
+svc.updateCharacteristic(Characteristic.On, false);
+}
+})
+.onGet(() => false);
+childAccessory.addService(svc);
 
-    configureAccessory() {}
+    // Attach child to the published Bridge
+bridgeAccessory.addBridgedAccessory(childAccessory);
+this.log.info(`Published Bridge and accessory: ${name}`);
+}
+
+configureAccessory() {}
 }
