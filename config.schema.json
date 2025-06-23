@@ -1,12 +1,12 @@
 {
   "pluginAlias": "homebridge-smartthings-routine",
-  "pluginType": "accessory",
+  "pluginType": "platform",
   "schema": {
     "type": "object",
     "properties": {
       "name": {
         "type": "string",
-        "title": "Accessory Name"
+        "title": "Bridge Name"
       },
       "routineId": {
         "type": "string",
@@ -14,8 +14,7 @@
       },
       "token": {
         "type": "string",
-        "title": "SmartThings API Token",
-        "description": "Enter your SmartThings API token"
+        "title": "SmartThings API Token"
       }
     },
     "required": ["name","routineId","token"]
