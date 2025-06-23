@@ -1,83 +1,65 @@
+// index.js
 const axios = require('axios');
-let Service, Characteristic, Bridge, Accessory, uuid;
+let Service, Characteristic;
 
 module.exports = (api) => {
-    Service = api.hap.Service;
+    Service        = api.hap.Service;
     Characteristic = api.hap.Characteristic;
-    Bridge = api.hap.Bridge;
-    Accessory = api.platformAccessory;
-    uuid = api.hap.uuid;
-
-    api.registerPlatform(
-        'homebridge-smartthings-routine',
-        'StRoutinePlatform',
-        StRoutinePlatform,
-        true
+    api.registerAccessory(
+        'homebridge-smartthings-routine',  // package.json name 과 일치
+        'StRoutine',                       // config.json 의 accessory: "StRoutine"
+        StRoutine
     );
 };
 
-class StRoutinePlatform {
+class StRoutine {
     constructor(log, config, api) {
-        this.log = log;
-        this.name = config.name;
+        this.log       = log;
+        this.name      = config.name;
         this.routineId = config.routineId;
-        this.token = config.token;
-        this.api = api;
+        this.token     = config.token;
+        this.api       = api;
 
         if (!this.name || !this.routineId || !this.token) {
-            throw new Error('Missing required config: name, routineId, token');
+            throw new Error('name, routineId, token은 필수입니다.');
         }
 
-        this.api.on('didFinishLaunching', () => {
-            this.publishBridgeAndAccessory();
-        });
-    }
-
-    publishBridgeAndAccessory() {
-        const name = this.name;
-        const bridgeUUID = uuid.generate(name);
-
-        // Create external Bridge as a PlatformAccessory
-        const bridgeAccessory = new Accessory(name, bridgeUUID);
-        bridgeAccessory.category = this.api.hap.Categories.BRIDGE;
-        bridgeAccessory
-            .getService(Service.AccessoryInformation)
-            .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
-            .setCharacteristic(Characteristic.Model, 'RoutineBridge');
-
-        // Create Routine TV accessory (전원 버튼만)
-        const accUUID = uuid.generate(`${name}-${this.routineId}`);
-        const tvAccessory = new Accessory(name, accUUID);
-        tvAccessory.category = this.api.hap.Categories.TV;
-        // TV 서비스
-        const tvService = new Service.Television(name, 'tvService');
-        // 이름 설정
-        tvService.setCharacteristic(Characteristic.ConfiguredName, name)
+        // Television 서비스 하나만 노출
+        this.tvService = new Service.Television(this.name, 'tvService');
+        this.tvService
+            .setCharacteristic(Characteristic.ConfiguredName, this.name)
             .setCharacteristic(
-                Characteristic.SleepDiscoveryMode, Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
+                Characteristic.SleepDiscoveryMode,
+                Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
             );
-        // 전원 버튼(Active) 핸들러
-        tvService.getCharacteristic(Characteristic.Active)
+
+        this.tvService
+            .getCharacteristic(Characteristic.Active)
             .onSet(async (value) => {
                 if (value !== Characteristic.Active.ACTIVE) return;
-                // 루틴 실행
-                await axios.post(
-                    `https://api.smartthings.com/v1/scenes/${this.routineId}/execute`,
-                    {}, { headers: { Authorization: `Bearer ${this.token}` } }
-                );
-                // 버튼 누른 뒤에는 다시 Inactive 로 리셋
-                tvService.updateCharacteristic(Characteristic.Active, Characteristic.Active.INACTIVE);
-            }).onGet(() => Characteristic.Active.INACTIVE);
-        tvAccessory.addService(tvService);
-
-        // Publish both bridge and routine accessory
-        this.api.publishExternalAccessories(
-            'homebridge-smartthings-routine',
-            [bridgeAccessory, tvAccessory]
-        );
-
-        this.log.info(`Published Bridge and Routine accessory: ${name}`);
+                try {
+                    await axios.post(
+                        `https://api.smartthings.com/v1/scenes/${this.routineId}/execute`,
+                        {}, { headers: { Authorization: `Bearer ${this.token}` } }
+                    );
+                    this.log.info(`Executed routine: ${this.name}`);
+                } catch (e) {
+                    this.log.error(`Error executing routine ${this.name}`, e);
+                    throw new this.api.hap.HapStatusError(
+                        this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
+                    );
+                } finally {
+                    // 버튼처럼 누를 수 있게 다시 끔
+                    this.tvService.updateCharacteristic(
+                        Characteristic.Active,
+                        Characteristic.Active.INACTIVE
+                    );
+                }
+            })
+            .onGet(() => Characteristic.Active.INACTIVE);
     }
 
-    configureAccessory() {}
+    getServices() {
+        return [this.tvService];
+    }
 }
