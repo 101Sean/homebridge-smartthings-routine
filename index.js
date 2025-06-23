@@ -1,17 +1,15 @@
 const axios = require('axios');
-let Service, Characteristic, Bridge, Accessory, uuid;
+let Service, Characteristic, Accessory, uuid;
 
 module.exports = (api) => {
     Service        = api.hap.Service;
     Characteristic = api.hap.Characteristic;
-    Bridge         = api.hap.Bridge;
     Accessory      = api.platformAccessory;
     uuid           = api.hap.uuid;
 
-    // Register as dynamic platform
-    // Register as dynamic platform\ n  // Use plugin identifier matching package.json name: "homebridge-smartthings-routine"
+    // Dynamic platform registration
     api.registerPlatform(
-        'homebridge-smartthings-routine', // match your package.json "name"
+        'homebridge-smartthings-routine',  // must match package.json name
         'StRoutinePlatform',
         StRoutinePlatform,
         true
@@ -21,9 +19,9 @@ module.exports = (api) => {
 class StRoutinePlatform {
     constructor(log, config, api) {
         this.log        = log;
-        this.name       = config.name;       // Bridge Name
-        this.routineId  = config.routineId;  // SmartThings Scene ID
-        this.token      = config.token;      // SmartThings API Token
+        this.name       = config.name;
+        this.routineId  = config.routineId;
+        this.token      = config.token;
         this.switchName = config.switchName || 'Run Routine';
         this.api        = api;
 
@@ -32,26 +30,27 @@ class StRoutinePlatform {
         }
 
         this.api.on('didFinishLaunching', () => {
-            this.publishChildBridge();
+            this.publishBridgeAndSwitch();
         });
     }
 
-    publishChildBridge() {
-        // Create child Bridge
+    publishBridgeAndSwitch() {
+        // Create a Bridge accessory
         const bridgeUUID = uuid.generate(this.name);
-        const childBridge = new Bridge(this.name, bridgeUUID);
-        childBridge
+        const bridgeAcc  = new Accessory(this.name, bridgeUUID);
+        bridgeAcc.category = this.api.hap.Categories.BRIDGE;
+        bridgeAcc
             .getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
-            .setCharacteristic(Characteristic.Model, 'RoutineChildBridge');
+            .setCharacteristic(Characteristic.Model, 'RoutineBridge');
 
-        // Create Switch accessory
+        // Create a Switch accessory for the routine
         const switchUUID = uuid.generate(this.switchName);
-        const switchAcc = new Accessory(this.switchName, switchUUID);
+        const switchAcc  = new Accessory(this.switchName, switchUUID);
         switchAcc.category = this.api.hap.Categories.SWITCH;
 
-        const switchSvc = new Service.Switch(this.switchName);
-        switchSvc
+        const svc = new Service.Switch(this.switchName);
+        svc
             .getCharacteristic(Characteristic.On)
             .onSet(async (value) => {
                 if (!value) return;
@@ -68,25 +67,20 @@ class StRoutinePlatform {
                         this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
                     );
                 } finally {
-                    switchSvc.updateCharacteristic(Characteristic.On, false);
+                    svc.updateCharacteristic(Characteristic.On, false);
                 }
             })
             .onGet(() => false);
-        switchAcc.addService(switchSvc);
+        switchAcc.addService(svc);
 
-        // Attach switch to Bridge
-        childBridge.addBridgedAccessory(switchAcc);
-
-        // Publish only the child Bridge
+        // Publish both bridge and switch as External Accessories
         this.api.publishExternalAccessories(
-            'homebridge-smartthings-childbridge',
-            [childBridge]
+            'homebridge-smartthings-routine',
+            [bridgeAcc, switchAcc]
         );
 
-        this.log.info(`Published child Bridge and switch: ${this.name}`);
+        this.log.info(`Published bridge and switch: ${this.name}`);
     }
 
-    configureAccessory() {
-        // no-op
-    }
+    configureAccessory() {}
 }
