@@ -1,4 +1,3 @@
-// index.js
 const axios = require('axios');
 let Service, Characteristic, Bridge, Accessory, uuid;
 
@@ -9,10 +8,10 @@ module.exports = (api) => {
     Accessory      = api.platformAccessory;
     uuid           = api.hap.uuid;
 
-    // pluginIdentifier를 package.json name과 동일하게!
+    // Register as dynamic platform
     api.registerPlatform(
-        'homebridge-smartthings-routine',  // ← package.json name
-        'StRoutinePlatform',
+        'homebridge-smartthings-childbridge', // package.json name
+        'StRoutinePlatform',                  // platform identifier
         StRoutinePlatform,
         true
     );
@@ -20,79 +19,70 @@ module.exports = (api) => {
 
 class StRoutinePlatform {
     constructor(log, config, api) {
-        this.log       = log;
-        this.name      = config.name;       // ex. "Good Morning Bridge"
-        this.routineId = config.routineId;  // SmartThings sceneId
-        this.token     = config.token;      // SmartThings token
-        this.api       = api;
+        this.log        = log;
+        this.name       = config.name;       // Bridge Name
+        this.routineId  = config.routineId;  // SmartThings Scene ID
+        this.token      = config.token;      // SmartThings API Token
+        this.switchName = config.switchName || 'Run Routine';
+        this.api        = api;
 
         if (!this.name || !this.routineId || !this.token) {
-            throw new Error('name, routineId, token 모두 설정해 주세요');
+            throw new Error('name, routineId, token are required');
         }
 
-        // Homebridge 완전 기동 후 발행
-        this.api.on('didFinishLaunching', () => this.publishSubBridge());
+        this.api.on('didFinishLaunching', () => {
+            this.publishChildBridge();
+        });
     }
 
-    publishSubBridge() {
-        // 1) 하위 브리지 생성
+    publishChildBridge() {
+        // Create child Bridge
         const bridgeUUID = uuid.generate(this.name);
-        const subBridge  = new Bridge(this.name, bridgeUUID);
-        subBridge
+        const childBridge = new Bridge(this.name, bridgeUUID);
+        childBridge
             .getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
-            .setCharacteristic(Characteristic.Model, 'RoutineBridge');
+            .setCharacteristic(Characteristic.Model, 'RoutineChildBridge');
 
-        // 2) TV 액세서리 생성 (전원 버튼)
-        const tvName      = `${this.name} Routine`;
-        const tvUUID      = uuid.generate(tvName);
-        const tvAccessory = new Accessory(tvName, tvUUID);
-        tvAccessory.category = this.api.hap.Categories.TV;
+        // Create Switch accessory
+        const switchUUID = uuid.generate(this.switchName);
+        const switchAcc = new Accessory(this.switchName, switchUUID);
+        switchAcc.category = this.api.hap.Categories.SWITCH;
 
-        const tvService = new Service.Television(tvName, 'tvService');
-        tvService
-            .setCharacteristic(Characteristic.ConfiguredName, tvName)
-            .setCharacteristic(
-                Characteristic.SleepDiscoveryMode,
-                Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
-            );
-
-        tvService.getCharacteristic(Characteristic.Active)
-            .onSet(async (v) => {
-                if (v !== Characteristic.Active.ACTIVE) return;
+        const switchSvc = new Service.Switch(this.switchName);
+        switchSvc
+            .getCharacteristic(Characteristic.On)
+            .onSet(async (value) => {
+                if (!value) return;
                 try {
                     await axios.post(
                         `https://api.smartthings.com/v1/scenes/${this.routineId}/execute`,
-                        {}, { headers: { Authorization: `Bearer ${this.token}` } }
+                        {},
+                        { headers: { Authorization: `Bearer ${this.token}` } }
                     );
-                    this.log.info(`Executed routine: ${tvName}`);
-                } catch (e) {
-                    this.log.error(`Error executing: ${tvName}`, e);
+                    this.log.info(`Executed routine: ${this.switchName}`);
+                } catch (err) {
+                    this.log.error(`Error executing ${this.switchName}`, err);
                     throw new this.api.hap.HapStatusError(
                         this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
                     );
                 } finally {
-                    // 버튼처럼 매번 누를 수 있도록 자동 reset
-                    tvService.updateCharacteristic(
-                        Characteristic.Active,
-                        Characteristic.Active.INACTIVE
-                    );
+                    switchSvc.updateCharacteristic(Characteristic.On, false);
                 }
             })
-            .onGet(() => Characteristic.Active.INACTIVE);
+            .onGet(() => false);
+        switchAcc.addService(switchSvc);
 
-        tvAccessory.addService(tvService);
+        // Attach switch to Bridge
+        childBridge.addBridgedAccessory(switchAcc);
 
-        // 3) TV 액세서리를 하위 브리지에 붙이기
-        subBridge.addBridgedAccessory(tvAccessory);
-
-        // 4) 오직 하위 브리지(Child Bridge)만 External Accessory로 공개
+        // Publish only the child Bridge
         this.api.publishExternalAccessories(
-            'homebridge-smartthings-routine',  // ← pluginIdentifier
-            [ subBridge ]
+            'homebridge-smartthings-childbridge',
+            [childBridge]
         );
 
-        this.log.info(`Published Sub-Bridge and its TV accessory: ${this.name}`);
+        this.log.info(`Published child Bridge and switch: ${this.name}`);
     }
 
     configureAccessory() {
