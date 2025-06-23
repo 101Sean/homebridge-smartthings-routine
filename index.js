@@ -9,9 +9,10 @@ module.exports = (api) => {
     uuid           = api.hap.uuid;
 
     // Register as dynamic platform
+    // Register as dynamic platform\ n  // Use plugin identifier matching package.json name: "homebridge-smartthings-routine"
     api.registerPlatform(
-        'homebridge-smartthings-childbridge', // package.json name
-        'StRoutinePlatform',                  // platform identifier
+        'homebridge-smartthings-routine', // match your package.json "name"
+        'StRoutinePlatform',
         StRoutinePlatform,
         true
     );

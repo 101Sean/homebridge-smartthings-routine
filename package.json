@@ -1,5 +1,5 @@
 {
-  "name": "homebridge-smartthings-childbridge",
+  "name": "homebridge-smartthings-routine",
   "version": "1.0.7",
   "description": "SmartThings Routine as a child HomeKit Bridge with a Switch accessory",
   "main": "index.js",
