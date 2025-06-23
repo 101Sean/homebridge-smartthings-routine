@@ -1,6 +1,6 @@
 {
   "name": "homebridge-smartthings-routine",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "SmartThings Routine as HomeKit TV-icon Bridge",
   "main": "index.js",
   "keywords": ["homebridge-plugin","homebridge-platform","smartthings","routine","tv","switch"],
