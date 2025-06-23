@@ -8,32 +8,36 @@ module.exports = (api) => {
     Accessory = api.platformAccessory;
     uuid = api.hap.uuid;
 
-    api.registerPlatform('homebridge-smartthings-routine', 'StRoutinePlatform', StRoutinePlatform, true);
+    api.registerPlatform(
+        'homebridge-smartthings-routine',
+        'StRoutinePlatform',
+        StRoutinePlatform,
+        true
+    );
 };
 
 class StRoutinePlatform {
     constructor(log, config, api) {
         this.log = log;
-        this.config = config;
-        this.api = api;
-
         this.name = config.name;
         this.routineId = config.routineId;
         this.token = config.token;
+        this.api = api;
 
         if (!this.name || !this.routineId || !this.token) {
-            throw new Error('name, routineId, token must be provided in config');
+            throw new Error('Missing required config: name, routineId, token');
         }
 
-        // Delay until Homebridge fully launches
-        this.api.on('didFinishLaunching', () => this.publish());
+        this.api.on('didFinishLaunching', () => {
+            this.publishBridgeAndAccessory();
+        });
     }
 
-    publish() {
+    publishBridgeAndAccessory() {
         const name = this.name;
         const bridgeUUID = uuid.generate(name);
 
-        // Create PlatformAccessory to act as external Bridge
+        // Create external Bridge as a PlatformAccessory
         const bridgeAccessory = new Accessory(name, bridgeUUID);
         bridgeAccessory.category = this.api.hap.Categories.BRIDGE;
         bridgeAccessory
@@ -41,57 +45,41 @@ class StRoutinePlatform {
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
             .setCharacteristic(Characteristic.Model, 'RoutineBridge');
 
-        // Create child accessory under the Bridge
-        const childUUID = uuid.generate(`${name}-${this.routineId}`);
-        const childAccessory = new Accessory(name, childUUID);
-        childAccessory.category = this.api.hap.Categories.TV;
+        // Create Routine switch accessory
+        const accUUID = uuid.generate(`${name}-${this.routineId}`);
+        const routineAccessory = new Accessory(name, accUUID);
+        routineAccessory.category = this.api.hap.Categories.TV;
 
         const svc = new Service.Switch(name);
         svc
             .getCharacteristic(Characteristic.On)
-            .onSet(async val => {
-                if (!val) return;
+            .onSet(async (value) => {
+                if (!value) return;
                 try {
                     await axios.post(
                         `https://api.smartthings.com/v1/scenes/${this.routineId}/execute`,
                         {},
                         { headers: { Authorization: `Bearer ${this.token}` } }
                     );
-                    this.log.info(`Executed ${name}`);
-                } catch (e) {
-                    this.log.error(`Error executing ${name}`, e);
+                    this.log.info(`Executed routine: ${name}`);
+                } catch (err) {
+                    this.log.error(`Error executing routine: ${name}`, err);
                     throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
                 } finally {
-                    svc.updateCharacteristic(Characteristic.On, false);
+                    svc.updateValue(false);
                 }
             })
             .onGet(() => false);
-        childAccessory.addService(svc);
+        routineAccessory.addService(svc);
 
-        // Publish both as external accessories (Bridge + child)
+        // Publish both bridge and routine accessory
         this.api.publishExternalAccessories(
             'homebridge-smartthings-routine',
-            [bridgeAccessory, childAccessory]
+            [bridgeAccessory, routineAccessory]
         );
 
-        this.log.info(`Published Bridge and accessory: ${name}`);
+        this.log.info(`Published Bridge and Routine accessory: ${name}`);
     }
-);
-    this.log.info(`Executed ${name}`);
-} catch (e) {
-this.log.error(`Error executing ${name}`, e);
-throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
-} finally {
-svc.updateCharacteristic(Characteristic.On, false);
-}
-})
-.onGet(() => false);
-childAccessory.addService(svc);
 
-    // Attach child to the published Bridge
-bridgeAccessory.addBridgedAccessory(childAccessory);
-this.log.info(`Published Bridge and accessory: ${name}`);
-}
-
-configureAccessory() {}
+    configureAccessory() {}
 }
