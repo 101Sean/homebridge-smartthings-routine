@@ -1,14 +1,15 @@
 {
   "name": "homebridge-smartthings-routine",
-  "version": "1.0.0",
-  "description": "Run a SmartThings Routine via a HomeKit TV power button",
+  "version": "1.0.6",
+  "description": "SmartThings Routine as a child HomeKit Bridge with TV power button",
   "main": "index.js",
   "keywords": [
     "homebridge-plugin",
-    "homekit",
+    "homebridge-platform",
     "smartthings",
     "routine",
-    "tv"
+    "tv",
+    "bridge"
   ],
   "engines": { "node": ">=14.17.0" },
   "dependencies": {
@@ -18,12 +19,12 @@
     "homebridge": ">=1.5.0"
   },
   "homebridge": {
-    "accessories": [
+    "platforms": [
       {
-        "accessory": "StRoutine",
-        "name": "",
-        "routineId": "",
-        "token": ""
+        "platform": "StRoutinePlatform",
+        "name": "Good Morning Bridge",
+        "routineId": "YOUR_SCENE_ID_HERE",
+        "token":     "YOUR_SMARTTHINGS_TOKEN_HERE"
       }
     ]
   }
