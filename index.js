@@ -1,16 +1,17 @@
 const axios = require('axios');
-let Service, Characteristic, Accessory, uuid;
+let Service, Characteristic, Bridge, Accessory, uuid;
 
 module.exports = (api) => {
     Service        = api.hap.Service;
     Characteristic = api.hap.Characteristic;
+    Bridge         = api.hap.Bridge;
     Accessory      = api.platformAccessory;
     uuid           = api.hap.uuid;
 
-    // Dynamic platform registration
+    // Register as dynamic platform
     api.registerPlatform(
-        'homebridge-smartthings-routine',  // must match package.json name
-        'StRoutinePlatform',
+        'homebridge-smartthings-routine', // package.json name
+        'StRoutinePlatform',                  // platform identifier
         StRoutinePlatform,
         true
     );
@@ -19,9 +20,9 @@ module.exports = (api) => {
 class StRoutinePlatform {
     constructor(log, config, api) {
         this.log        = log;
-        this.name       = config.name;
-        this.routineId  = config.routineId;
-        this.token      = config.token;
+        this.name       = config.name;       // Bridge Name
+        this.routineId  = config.routineId;  // SmartThings Scene ID
+        this.token      = config.token;      // SmartThings API Token
         this.switchName = config.switchName || 'Run Routine';
         this.api        = api;
 
@@ -30,27 +31,26 @@ class StRoutinePlatform {
         }
 
         this.api.on('didFinishLaunching', () => {
-            this.publishBridgeAndSwitch();
+            this.publishChildBridge();
         });
     }
 
-    publishBridgeAndSwitch() {
-        // Create a Bridge accessory
+    publishChildBridge() {
+        // Create child Bridge
         const bridgeUUID = uuid.generate(this.name);
-        const bridgeAcc  = new Accessory(this.name, bridgeUUID);
-        bridgeAcc.category = this.api.hap.Categories.BRIDGE;
-        bridgeAcc
+        const childBridge = new Bridge(this.name, bridgeUUID);
+        childBridge
             .getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
-            .setCharacteristic(Characteristic.Model, 'RoutineBridge');
+            .setCharacteristic(Characteristic.Model, 'RoutineChildBridge');
 
-        // Create a Switch accessory for the routine
+        // Create Switch accessory
         const switchUUID = uuid.generate(this.switchName);
-        const switchAcc  = new Accessory(this.switchName, switchUUID);
+        const switchAcc = new Accessory(this.switchName, switchUUID);
         switchAcc.category = this.api.hap.Categories.SWITCH;
 
-        const svc = new Service.Switch(this.switchName);
-        svc
+        const switchSvc = new Service.Switch(this.switchName);
+        switchSvc
             .getCharacteristic(Characteristic.On)
             .onSet(async (value) => {
                 if (!value) return;
@@ -67,20 +67,25 @@ class StRoutinePlatform {
                         this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
                     );
                 } finally {
-                    svc.updateCharacteristic(Characteristic.On, false);
+                    switchSvc.updateCharacteristic(Characteristic.On, false);
                 }
             })
             .onGet(() => false);
-        switchAcc.addService(svc);
+        switchAcc.addService(switchSvc);
 
-        // Publish both bridge and switch as External Accessories
+        // Attach switch to Bridge
+        childBridge.addBridgedAccessory(switchAcc);
+
+        // Publish only the child Bridge
         this.api.publishExternalAccessories(
-            'homebridge-smartthings-routine',
-            [bridgeAcc, switchAcc]
+            'homebridge-smartthings-childbridge',
+            [childBridge]
         );
 
-        this.log.info(`Published bridge and switch: ${this.name}`);
+        this.log.info(`Published child Bridge and switch: ${this.name}`);
     }
 
-    configureAccessory() {}
+    configureAccessory() {
+        // no-op
+    }
 }
