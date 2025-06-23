@@ -1,18 +1,19 @@
 const axios = require('axios');
-let Service, Characteristic, Accessory, uuid;
+let Service, Characteristic, Bridge, Accessory, uuid;
 
 module.exports = (api) => {
     Service        = api.hap.Service;
     Characteristic = api.hap.Characteristic;
+    Bridge         = api.hap.Bridge;
     Accessory      = api.platformAccessory;
     uuid           = api.hap.uuid;
 
-    // Dynamic platform registration
+    // Dynamic platform registration (plugin name must match package.json "name")
     api.registerPlatform(
-        'homebridge-smartthings-routine',  // must match package.json name
-        'StRoutinePlatform',
-        StRoutinePlatform,
-        true
+        'homebridge-smartthings-routine', // pluginIdentifier
+        'StRoutinePlatform',                  // platform name
+        StRoutinePlatform,                    // constructor
+        true                                  // dynamic
     );
 };
 
@@ -22,65 +23,71 @@ class StRoutinePlatform {
         this.name       = config.name;
         this.routineId  = config.routineId;
         this.token      = config.token;
-        this.switchName = config.switchName || 'Run Routine';
+        this.buttonName = config.buttonName || 'Run Routine';
         this.api        = api;
 
         if (!this.name || !this.routineId || !this.token) {
-            throw new Error('name, routineId, token are required');
+            throw new Error('name, routineId, and token are required');
         }
 
         this.api.on('didFinishLaunching', () => {
-            this.publishBridgeAndSwitch();
+            this.publishBridgeWithButton();
         });
     }
 
-    publishBridgeAndSwitch() {
-        // Create a Bridge accessory
+    publishBridgeWithButton() {
+        // 1) Child Bridge
         const bridgeUUID = uuid.generate(this.name);
-        const bridgeAcc  = new Accessory(this.name, bridgeUUID);
-        bridgeAcc.category = this.api.hap.Categories.BRIDGE;
-        bridgeAcc
+        const childBridge = new Bridge(this.name, bridgeUUID);
+        childBridge
             .getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
-            .setCharacteristic(Characteristic.Model, 'RoutineBridge');
+            .setCharacteristic(Characteristic.Model, 'RoutineChildBridge');
 
-        // Create a Switch accessory for the routine
-        const switchUUID = uuid.generate(this.switchName);
-        const switchAcc  = new Accessory(this.switchName, switchUUID);
-        switchAcc.category = this.api.hap.Categories.SWITCH;
+        // 2) Momentary Button accessory
+        const buttonUUID = uuid.generate(this.buttonName);
+        const buttonAcc  = new Accessory(this.buttonName, buttonUUID);
+        buttonAcc.category = this.api.hap.Categories.PROGRAMMABLE_SWITCH;
 
-        const svc = new Service.Switch(this.switchName);
-        svc
-            .getCharacteristic(Characteristic.On)
-            .onSet(async (value) => {
-                if (!value) return;
+        const buttonSvc = new Service.StatelessProgrammableSwitch(this.buttonName);
+        buttonSvc
+            .getCharacteristic(Characteristic.ProgrammableSwitchEvent)
+            .onSet(async () => {
                 try {
                     await axios.post(
                         `https://api.smartthings.com/v1/scenes/${this.routineId}/execute`,
                         {},
                         { headers: { Authorization: `Bearer ${this.token}` } }
                     );
-                    this.log.info(`Executed routine: ${this.switchName}`);
+                    this.log.info(`Executed routine: ${this.buttonName}`);
                 } catch (err) {
-                    this.log.error(`Error executing ${this.switchName}`, err);
+                    this.log.error(`Error executing ${this.buttonName}`, err);
                     throw new this.api.hap.HapStatusError(
                         this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
                     );
                 } finally {
-                    svc.updateCharacteristic(Characteristic.On, false);
+                    // Show press animation in HomeKit
+                    buttonSvc.updateCharacteristic(
+                        Characteristic.ProgrammableSwitchEvent,
+                        Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS
+                    );
                 }
-            })
-            .onGet(() => false);
-        switchAcc.addService(svc);
+            });
+        buttonAcc.addService(buttonSvc);
 
-        // Publish both bridge and switch as External Accessories
+        // 3) Attach button to Bridge
+        childBridge.addBridgedAccessory(buttonAcc);
+
+        // 4) Publish only the child Bridge
         this.api.publishExternalAccessories(
-            'homebridge-smartthings-routine',
-            [bridgeAcc, switchAcc]
+            'homebridge-smartthings-childbridge',
+            [childBridge]
         );
 
-        this.log.info(`Published bridge and switch: ${this.name}`);
+        this.log.info(`Published child Bridge and button: ${this.name}`);
     }
 
-    configureAccessory() {}
+    configureAccessory() {
+        // no-op
+    }
 }
