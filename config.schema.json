@@ -15,9 +15,9 @@
       "token": {
         "type": "string",
         "title": "SmartThings API Token",
-        "description": "Leave blank to use SMARTTHINGS_TOKEN env var"
+        "description": "Enter your SmartThings API token"
       }
     },
-    "required": ["name","routineId"]
+    "required": ["name","routineId","token"]
   }
 }

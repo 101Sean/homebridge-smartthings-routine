@@ -4,7 +4,7 @@ let Service, Characteristic;
 module.exports = (api) => {
     Service = api.hap.Service;
     Characteristic = api.hap.Characteristic;
-    api.registerAccessory('homebridge-smartthings-routine', 'StRoutine', StRoutine);
+    api.registerAccessory('homebridge-smartthings-routine','StRoutine',StRoutine);
 };
 
 class StRoutine {
@@ -12,22 +12,22 @@ class StRoutine {
         this.log       = log;
         this.name      = config.name;
         this.routineId = config.routineId;
-        // Token from config or environment
-        this.token     = config.token && config.token.trim() !== ''
-            ? config.token
-            : process.env.SMARTTHINGS_TOKEN;
-        if (!this.token) throw new Error('SmartThings API token must be provided');
+        this.token     = config.token;
+
+        if (!this.token || this.token.trim() === '') {
+            throw new Error('SmartThings API token is required in config');
+        }
 
         this.api       = api;
 
-        // TV category switch
+        // TV icon switch service
         this.service = new Service.Switch(this.name);
         this.service
             .getCharacteristic(Characteristic.On)
             .onSet(this.handleOnSet.bind(this))
             .onGet(() => false);
 
-        log.info(`[StRoutineTv] ${this.name} initialized`);
+        this.log.info(`[StRoutine] Initialized accessory: ${this.name}`);
     }
 
     getAccessoryCategory() {
@@ -46,13 +46,13 @@ class StRoutine {
                 {},
                 { headers: { Authorization: `Bearer ${this.token}` } }
             );
-            this.log.info(`[StRoutineTv] Executed routine ${this.name}`);
+            this.log.info(`[StRoutine] Executed routine: ${this.name}`);
         } catch (err) {
-            this.log.error(`[StRoutineTv] Failed to execute routine ${this.name}`, err);
+            this.log.error(`[StRoutine] Failed to execute routine: ${this.name}`, err);
             throw new this.api.hap.HapStatusError(this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
         } finally {
-            // reset switch
+            // reset switch to off
             this.service.updateCharacteristic(Characteristic.On, false);
         }
     }
-}` `
+}
