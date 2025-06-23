@@ -1,19 +1,30 @@
 {
   "name": "homebridge-smartthings-routine",
-  "version": "1.0.5",
-  "description": "SmartThings Routine as HomeKit TV-icon Bridge",
+  "version": "1.0.6",
+  "description": "SmartThings Routine as a child HomeKit Bridge",
   "main": "index.js",
-  "keywords": ["homebridge-plugin","homebridge-platform","smartthings","tv","routine"],
-  "engines": {"node": ">=14.17.0"},
-  "dependencies": {"axios": "^1.4.0"},
-  "peerDependencies": {"homebridge": ">=1.5.0"},
+  "keywords": [
+    "homebridge-plugin",
+    "homebridge-platform",
+    "smartthings",
+    "routine",
+    "tv",
+    "subbridge"
+  ],
+  "engines": { "node": ">=14.17.0" },
+  "dependencies": {
+    "axios": "^1.4.0"
+  },
+  "peerDependencies": {
+    "homebridge": ">=1.5.0"
+  },
   "homebridge": {
     "platforms": [
       {
         "platform": "StRoutinePlatform",
-        "name": "Good Morning",
+        "name": "Bridge",
         "routineId": "YOUR_SCENE_ID",
-        "token":     "YOUR_TOKEN"
+        "token": "YOUR_TOKEN"
       }
     ]
   }

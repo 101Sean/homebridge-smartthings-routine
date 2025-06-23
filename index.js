@@ -1,4 +1,3 @@
-// index.js
 const axios = require('axios');
 let Service, Characteristic, Bridge, Accessory, uuid;
 
@@ -9,8 +8,9 @@ module.exports = (api) => {
     Accessory      = api.platformAccessory;
     uuid           = api.hap.uuid;
 
+    // dynamic platform 으로 등록(true)
     api.registerPlatform(
-        'homebridge-smartthings-routine',
+        'homebridge-smartthings-subbridge',
         'StRoutinePlatform',
         StRoutinePlatform,
         true
@@ -20,35 +20,35 @@ module.exports = (api) => {
 class StRoutinePlatform {
     constructor(log, config, api) {
         this.log       = log;
-        this.name      = config.name;       // ex. "Good Morning"
+        this.name      = config.name;       // ex. "Good Morning Bridge"
         this.routineId = config.routineId;  // SmartThings sceneId
         this.token     = config.token;
         this.api       = api;
 
         if (!this.name || !this.routineId || !this.token) {
-            throw new Error('name, routineId, token 모두 설정해 주세요');
+            throw new Error('name, routineId, token 모두 필수입니다');
         }
 
-        // Homebridge가 완전히 기동된 뒤에 호출
-        this.api.on('didFinishLaunching', () => this.publishBridge());
+        // Homebridge 기동 완료 후 발행
+        this.api.on('didFinishLaunching', () => this.publishSubBridge());
     }
 
-    publishBridge() {
-        // 1) Bridge 생성 (HAP Bridge 객체)
+    publishSubBridge() {
+        // 1) 하위 브리지 객체 생성
         const bridgeUUID = uuid.generate(this.name);
-        const bridge = new Bridge(this.name, bridgeUUID);
-        bridge
+        const subBridge = new Bridge(this.name, bridgeUUID);
+        subBridge
             .getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
-            .setCharacteristic(Characteristic.Model, 'RoutineBridge');
+            .setCharacteristic(Characteristic.Model, 'RoutineSubBridge');
 
-        // 2) TV 액세서리 생성
+        // 2) 루틴용 TV 액세서리 생성
         const tvName = `${this.name} Routine`;
         const tvUUID = uuid.generate(tvName);
         const tvAccessory = new Accessory(tvName, tvUUID);
         tvAccessory.category = this.api.hap.Categories.TV;
 
-        // 3) Television 서비스 추가
+        // Television 서비스 — 전원 버튼 UI
         const tvService = new Service.Television(tvName, 'tvService');
         tvService
             .setCharacteristic(Characteristic.ConfiguredName, tvName)
@@ -56,9 +56,9 @@ class StRoutinePlatform {
                 Characteristic.SleepDiscoveryMode,
                 Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
             );
-        tvService
-            .getCharacteristic(Characteristic.Active)
-            .onSet(async v => {
+
+        tvService.getCharacteristic(Characteristic.Active)
+            .onSet(async (v) => {
                 if (v !== Characteristic.Active.ACTIVE) return;
                 try {
                     await axios.post(
@@ -67,7 +67,7 @@ class StRoutinePlatform {
                     );
                     this.log.info(`Executed routine: ${tvName}`);
                 } catch (e) {
-                    this.log.error(`Error executing ${tvName}`, e);
+                    this.log.error(`Error executing: ${tvName}`, e);
                     throw new this.api.hap.HapStatusError(
                         this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
                     );
@@ -82,17 +82,19 @@ class StRoutinePlatform {
 
         tvAccessory.addService(tvService);
 
-        // 4) 브리지에 TV 액세서리 붙이기
-        bridge.addBridgedAccessory(tvAccessory);
+        // 3) TV 액세서리를 하위 브리지에 붙이기
+        subBridge.addBridgedAccessory(tvAccessory);
 
-        // 5) Bridge 만 External Accessory 로 공개
+        // 4) 메인 브리지에 외부 브리지로 발행
         this.api.publishExternalAccessories(
-            'homebridge-smartthings-routine',
-            [ bridge ]
+            'homebridge-smartthings-subbridge',
+            [subBridge]
         );
 
-        this.log.info(`Published Bridge and its TV accessory: ${this.name}`);
+        this.log.info(`Published Sub-Bridge and TV accessory: ${this.name}`);
     }
 
-    configureAccessory() {}
+    configureAccessory() {
+        // no-op
+    }
 }
