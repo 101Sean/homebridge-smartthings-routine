@@ -1,16 +1,14 @@
-// index.js
 const axios = require('axios')
 
-let Service, Characteristic, uuid
+let Service, Characteristic
 
 module.exports = (homebridge) => {
     Service        = homebridge.hap.Service
     Characteristic = homebridge.hap.Characteristic
-    uuid           = homebridge.hap.uuid
 
     homebridge.registerAccessory(
-        'homebridge-smartthings-routine',
-        'TVRoutineAccessory',
+        'homebridge-smartthings-routine',  // package.json name
+        'TVRoutineAccessory',              // accessory 이름
         TVRoutineAccessory
     )
 }
@@ -26,12 +24,12 @@ class TVRoutineAccessory {
             throw new Error('name, routineId, token are required')
         }
 
-        // Accessory 정보 서비스
+        // 정보 서비스
         this.infoService = new Service.AccessoryInformation()
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
             .setCharacteristic(Characteristic.Model,        'TVRoutineAccessory')
 
-        // TV 서비스: 오직 Active 특성만 구현
+        // TV 서비스 (전원만)
         this.tvService = new Service.Television(this.name)
         this.tvService
             .setCharacteristic(Characteristic.ConfiguredName, this.name)
@@ -41,16 +39,16 @@ class TVRoutineAccessory {
             )
 
         this.tvService.getCharacteristic(Characteristic.Active)
-            .onGet(this.handleGetActive.bind(this))
-            .onSet(this.handleSetActive.bind(this))
+            .on('get', this.handleGetActive.bind(this))
+            .on('set', this.handleSetActive.bind(this))
     }
 
-    handleGetActive() {
-        // 항상 INACTIVE 로 반환 → 버튼처럼 동작
-        return Characteristic.Active.INACTIVE
+    handleGetActive(callback) {
+        // 항상 INACTIVE 반환 (버튼처럼 동작)
+        callback(null, Characteristic.Active.INACTIVE)
     }
 
-    async handleSetActive(value) {
+    async handleSetActive(value, callback) {
         if (value === Characteristic.Active.ACTIVE) {
             try {
                 await axios.post(
@@ -61,16 +59,20 @@ class TVRoutineAccessory {
                 this.log.info(`Executed TV routine: ${this.name}`)
             } catch (err) {
                 this.log.error('Error executing TV routine', err)
-                // HomeKit에 오류 상태 전파
-                throw new Error('SERVICE_COMMUNICATION_FAILURE')
-            } finally {
-                // 토글 후 즉시 INACTIVE 로 리셋
+                // 실패해도 토글 리셋
                 this.tvService.updateCharacteristic(
                     Characteristic.Active,
                     Characteristic.Active.INACTIVE
                 )
+                return callback(new Error('SERVICE_COMMUNICATION_FAILURE'))
             }
+            // 성공 시에도 토글 리셋
+            this.tvService.updateCharacteristic(
+                Characteristic.Active,
+                Characteristic.Active.INACTIVE
+            )
         }
+        callback()
     }
 
     getServices() {
