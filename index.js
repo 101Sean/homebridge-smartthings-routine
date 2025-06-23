@@ -1,58 +1,60 @@
 // index.js
-const axios = require('axios');
-let Service, Characteristic, Bridge, Accessory, uuid;
+const axios = require('axios')
+let Service, Characteristic, Accessory, uuid
 
 module.exports = (api) => {
-    Service        = api.hap.Service;
-    Characteristic = api.hap.Characteristic;
-    Bridge         = api.hap.Bridge;
-    Accessory      = api.platformAccessory;
-    uuid           = api.hap.uuid;
+    Service        = api.hap.Service
+    Characteristic = api.hap.Characteristic
+    Accessory      = api.platformAccessory
+    uuid           = api.hap.uuid
 
     api.registerPlatform(
-        'homebridge-smartthings-routine',
-        'StRoutinePlatform',
+        'homebridge-smartthings-routine', // package.json name
+        'StRoutinePlatform',              // platform identifier
         StRoutinePlatform,
         true
-    );
-};
+    )
+}
 
 class StRoutinePlatform {
     constructor(log, config, api) {
-        this.log        = log;
-        this.name       = config.name;
-        this.routineId  = config.routineId;
-        this.token      = config.token;
-        this.switchName = config.switchName || 'Run Routine';
-        this.api        = api;
+        this.log        = log
+        this.name       = config.name       // 홈브릿지 상 표시 이름
+        this.routineId  = config.routineId  // SmartThings Scene ID
+        this.token      = config.token      // SmartThings API Token
+        this.switchName = config.switchName || 'Run Routine'
+        this.api        = api
 
         if (!this.name || !this.routineId || !this.token) {
-            throw new Error('name, routineId, token are required');
+            throw new Error('name, routineId, token are required')
         }
 
         this.api.on('didFinishLaunching', () => {
-            this.publishChildBridge();
-        });
+            this.publishAccessory()
+        })
     }
 
-    publishChildBridge() {
-        const bridgeUUID  = uuid.generate(this.name);
-        const childBridge = new Bridge(this.name, bridgeUUID);
-        childBridge.getService(Service.AccessoryInformation)
+    publishAccessory() {
+        // 1) PlatformAccessory 생성
+        const uuidVal = uuid.generate(this.name)
+        const tvAcc   = new Accessory(this.name, uuidVal)
+
+        // 2) 카테고리 TV 로 설정 (아이콘)
+        tvAcc.category = this.api.hap.Categories.TELEVISION
+
+        // 3) AccessoryInformation 서비스 설정
+        tvAcc.getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
-            .setCharacteristic(Characteristic.Model,        'RoutineTVBridge');
+            .setCharacteristic(Characteristic.Model,        'RoutineTV')
 
-        const tvUUID = uuid.generate(this.switchName);
-        const tvAcc  = new Accessory(this.switchName, tvUUID);
-        tvAcc.category = this.api.hap.Categories.TELEVISION;
-
-        const tvSvc = new Service.Television(this.switchName);
+        // 4) TV 서비스(전원만) 설정
+        const tvSvc = new Service.Television(this.name)
         tvSvc
-            .setCharacteristic(Characteristic.ConfiguredName, this.switchName)
+            .setCharacteristic(Characteristic.ConfiguredName, this.name)
             .setCharacteristic(
                 Characteristic.SleepDiscoveryMode,
                 Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
-            );
+            )
 
         tvSvc.getCharacteristic(Characteristic.Active)
             .onGet(() => Characteristic.Active.INACTIVE)
@@ -63,32 +65,35 @@ class StRoutinePlatform {
                             `https://api.smartthings.com/v1/scenes/${this.routineId}/execute`,
                             {},
                             { headers: { Authorization: `Bearer ${this.token}` } }
-                        );
-                        this.log.info(`Executed TV routine: ${this.switchName}`);
+                        )
+                        this.log.info(`Executed TV routine: ${this.name}`)
                     } catch (err) {
-                        this.log.error(`Error executing TV routine`, err);
+                        this.log.error(`Error executing TV routine`, err)
                         throw new this.api.hap.HapStatusError(
                             this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
-                        );
+                        )
                     } finally {
+                        // 버튼 리셋
                         tvSvc.updateCharacteristic(
                             Characteristic.Active,
                             Characteristic.Active.INACTIVE
-                        );
+                        )
                     }
                 }
-                callback();
-            });
+                callback()
+            })
 
-        tvAcc.addService(tvSvc);
-        childBridge.addBridgedAccessory(tvAcc);
+        tvAcc.addService(tvSvc)
 
+        // 5) 외부 액세서리로 게시
         this.api.publishExternalAccessories(
-            'homebridge-smartthings-childbridge',
-            [ childBridge ]
-        );
-        this.log.info(`Published child bridge and TV: ${this.name}`);
+            'homebridge-smartthings-routine',
+            [ tvAcc ]
+        )
+        this.log.info(`Published TV accessory: ${this.name}`)
     }
 
-    configureAccessory() { /* no-op */ }
+    configureAccessory() {
+        // no-op
+    }
 }
