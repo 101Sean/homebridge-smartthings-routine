@@ -2,13 +2,12 @@ const axios = require('axios');
 let Service, Characteristic, Bridge, Accessory, uuid;
 
 module.exports = (api) => {
-    Service        = api.hap.Service;
+    Service = api.hap.Service;
     Characteristic = api.hap.Characteristic;
-    Bridge         = api.hap.Bridge;
-    Accessory      = api.platformAccessory;
-    uuid           = api.hap.uuid;
+    Bridge = api.hap.Bridge;
+    Accessory = api.platformAccessory;
+    uuid = api.hap.uuid;
 
-    // Register as dynamic platform
     api.registerPlatform(
         'homebridge-smartthings-routine',
         'StRoutinePlatform',
@@ -19,79 +18,65 @@ module.exports = (api) => {
 
 class StRoutinePlatform {
     constructor(log, config, api) {
-        this.log       = log;
-        this.name      = config.name;
+        this.log = log;
+        this.name = config.name;
         this.routineId = config.routineId;
-        this.token     = config.token;
-        this.api       = api;
+        this.token = config.token;
+        this.api = api;
 
         if (!this.name || !this.routineId || !this.token) {
-            throw new Error('name, routineId, token 모두 설정이 필요합니다.');
+            throw new Error('Missing required config: name, routineId, token');
         }
 
-        // Publish after Homebridge startup
-        this.api.on('didFinishLaunching', () => this.publishAccessory());
+        this.api.on('didFinishLaunching', () => {
+            this.publishBridgeAndAccessory();
+        });
     }
 
-    publishAccessory() {
-        const tvName = this.name;
-        const tvUUID = uuid.generate(tvName);
+    publishBridgeAndAccessory() {
+        const name = this.name;
+        const bridgeUUID = uuid.generate(name);
 
-        // Create a real TV accessory
-        const tvAccessory = new Accessory(tvName, tvUUID);
-        tvAccessory.category = this.api.hap.Categories.TV;
-
-        // Set accessory info
-        tvAccessory
+        // Create external Bridge as a PlatformAccessory
+        const bridgeAccessory = new Accessory(name, bridgeUUID);
+        bridgeAccessory.category = this.api.hap.Categories.BRIDGE;
+        bridgeAccessory
             .getService(Service.AccessoryInformation)
             .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
-            .setCharacteristic(Characteristic.Model, 'RoutineButton');
+            .setCharacteristic(Characteristic.Model, 'RoutineBridge');
 
-        // Add Television service for power button
-        const tvService = new Service.Television(tvName, 'tvService');
-        tvService
-            .setCharacteristic(Characteristic.ConfiguredName, tvName)
+        // Create Routine TV accessory (전원 버튼만)
+        const accUUID = uuid.generate(`${name}-${this.routineId}`);
+        const tvAccessory = new Accessory(name, accUUID);
+        tvAccessory.category = this.api.hap.Categories.TV;
+        // TV 서비스
+        const tvService = new Service.Television(name, 'tvService');
+        // 이름 설정
+        tvService.setCharacteristic(Characteristic.ConfiguredName, name)
             .setCharacteristic(
-                Characteristic.SleepDiscoveryMode,
-                Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
+                Characteristic.SleepDiscoveryMode, Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
             );
-
-        // Handle power (Active)
-        tvService
-            .getCharacteristic(Characteristic.Active)
+        // 전원 버튼(Active) 핸들러
+        tvService.getCharacteristic(Characteristic.Active)
             .onSet(async (value) => {
                 if (value !== Characteristic.Active.ACTIVE) return;
-                try {
-                    await axios.post(
-                        `https://api.smartthings.com/v1/scenes/${this.routineId}/execute`,
-                        {},
-                        { headers: { Authorization: `Bearer ${this.token}` } }
-                    );
-                    this.log.info(`Executed routine: ${tvName}`);
-                } catch (err) {
-                    this.log.error(`Routine 실행 오류: ${tvName}`, err);
-                    throw new this.api.hap.HapStatusError(
-                        this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
-                    );
-                } finally {
-                    // reset to inactive so button can be pressed again
-                    tvService.updateCharacteristic(
-                        Characteristic.Active,
-                        Characteristic.Active.INACTIVE
-                    );
-                }
-            })
-            .onGet(() => Characteristic.Active.INACTIVE);
-
+                // 루틴 실행
+                await axios.post(
+                    `https://api.smartthings.com/v1/scenes/${this.routineId}/execute`,
+                    {}, { headers: { Authorization: `Bearer ${this.token}` } }
+                );
+                // 버튼 누른 뒤에는 다시 Inactive 로 리셋
+                tvService.updateCharacteristic(Characteristic.Active, Characteristic.Active.INACTIVE);
+            }).onGet(() => Characteristic.Active.INACTIVE);
         tvAccessory.addService(tvService);
 
-        // Publish as a standalone external accessory (Bridge wrapper not needed)
+        // Publish both bridge and routine accessory
         this.api.publishExternalAccessories(
             'homebridge-smartthings-routine',
-            [tvAccessory]
+            [bridgeAccessory, tvAccessory]
         );
 
-        this.log.info(`Published TV-accessory: ${tvName}`);
+        this.log.info(`Published Bridge and Routine accessory: ${name}`);
     }
 
     configureAccessory() {}
