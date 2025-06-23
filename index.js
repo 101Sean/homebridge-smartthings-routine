@@ -48,7 +48,7 @@ class StRoutinePlatform {
         // Create Routine TV accessory (전원 버튼만)
         const accUUID = uuid.generate(`${name}-${this.routineId}`);
         const tvAccessory = new Accessory(name, accUUID);
-        tvAccessory.category = this.api.hap.Categories.TV;
+        tvAccessory.category = this.api.hap.Categories.TV_SET_TOP_BOX;
         // TV 서비스
         const tvService = new Service.Television(name, 'tvService');
         // 이름 설정
