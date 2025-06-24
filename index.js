@@ -44,108 +44,108 @@ class StRoutinePlatform {
             return
         }
 
-        // TV(204)만 제외
+        // 1) TV(204) 씬 제외
         scenes = scenes.filter(s => String(s.sceneIcon) !== '204')
 
-        const accessories = scenes.map(scene => {
-            const name     = (scene.sceneName || '').trim() || scene.sceneId
-            const iconCode = String(scene.sceneIcon)
+        // 2) 에어컨 씬만 뽑아서 On/Off 짝짓기
+        const acScenes = scenes.filter(s => String(s.sceneIcon) === '211')
+        let onScene, offScene
+        for (const s of acScenes) {
+            if (s.sceneName.includes('On'))  onScene  = s
+            if (s.sceneName.includes('Off')) offScene = s
+        }
 
-            let svc, category
+        const accessories = []
 
-            if (iconCode === '211') {
-                // ─── Fan ───
-                svc      = new Service.Fan(name)
-                category = this.api.hap.Categories.FAN
-                svc.setCharacteristic(Characteristic.ConfiguredName, name)
+        // 3) 에어컨 Fan 액세서리 (On/Off 토글)
+        if (onScene && offScene) {
+            const name = '에어컨'
+            // 간단히 context 에 상태 보관
+            let currentState = false
 
-                svc.getCharacteristic(Characteristic.On)
-                    .onGet(() => false)
-                    .onSet(async (value) => {
-                        this.log.info(`Fan onSet called (${name}):`, value)
-                        if (value) {
-                            try {
-                                await axios.post(
-                                    `https://api.smartthings.com/v1/scenes/${scene.sceneId}/execute`,
-                                    {},
-                                    { headers:{ Authorization:`Bearer ${this.token}` } }
-                                )
-                                this.log.info(`Executed Fan scene: ${name}`)
-                            } catch (err) {
-                                this.log.error(`Error executing Fan scene: ${name}`, err)
-                            }
-                            // 자동 Off
-                            svc.updateCharacteristic(Characteristic.On, false)
-                        }
-                    })
-            }
-            else if (iconCode === '212') {
-                // ─── Dehumidifier ───
-                svc      = new Service.HumidifierDehumidifier(name)
-                category = this.api.hap.Categories.HUMIDIFIERDEHUMIDIFIER
-                svc.setCharacteristic(Characteristic.ConfiguredName, name)
+            const acc = new this.api.platformAccessory(
+                name,
+                uuid.generate(onScene.sceneId + offScene.sceneId)
+            )
+            acc.category = this.api.hap.Categories.FAN
 
-                svc.getCharacteristic(Characteristic.Active)
-                    .onGet(() => Characteristic.Active.INACTIVE)
-                    .onSet(async (value) => {
-                        this.log.info(`Dehumidifier onSet called (${name}):`, value)
-                        if (value === Characteristic.Active.ACTIVE) {
-                            try {
-                                await axios.post(
-                                    `https://api.smartthings.com/v1/scenes/${scene.sceneId}/execute`,
-                                    {},
-                                    { headers:{ Authorization:`Bearer ${this.token}` } }
-                                )
-                                this.log.info(`Executed Dehumidifier scene: ${name}`)
-                            } catch (err) {
-                                this.log.error(`Error executing Dehumidifier scene: ${name}`, err)
-                            }
-                            // 자동 Inactive
+            const svc = new Service.Fan(name)
+            svc.setCharacteristic(Characteristic.ConfiguredName, name)
+
+            svc.getCharacteristic(Characteristic.On)
+                .onGet(() => {
+                    this.log.debug(`Fan onGet: ${currentState}`)
+                    return currentState
+                })
+                .onSet(async (value) => {
+                    this.log.info(`Setting Fan '${name}' to`, value)
+                    const sceneToRun = value ? onScene.sceneId : offScene.sceneId
+                    try {
+                        await axios.post(
+                            `https://api.smartthings.com/v1/scenes/${sceneToRun}/execute`,
+                            {},
+                            { headers:{ Authorization:`Bearer ${this.token}` } }
+                        )
+                        this.log.info(`Executed AC ${value ? 'On' : 'Off'} scene`)
+                        currentState = value
+                    } catch (err) {
+                        this.log.error(`Error executing AC ${value ? 'On' : 'Off'}`, err)
+                        throw new this.api.hap.HapStatusError(
+                            this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
+                        )
+                    }
+                })
+
+            acc.addService(svc)
+            accessories.push(acc)
+        }
+
+        // 4) 제습기(212) 씬 그대로
+        const dehumScenes = scenes.filter(s => String(s.sceneIcon) === '212')
+        for (const scene of dehumScenes) {
+            const name = scene.sceneName
+            const acc = new this.api.platformAccessory(
+                name,
+                uuid.generate(scene.sceneId)
+            )
+            acc.category = this.api.hap.Categories.HUMIDIFIERDEHUMIDIFIER
+
+            const svc = new Service.HumidifierDehumidifier(name)
+            svc.setCharacteristic(Characteristic.ConfiguredName, name)
+
+            svc.getCharacteristic(Characteristic.Active)
+                .onGet(() => Characteristic.Active.INACTIVE)
+                .onSet(async (value) => {
+                    if (value === Characteristic.Active.ACTIVE) {
+                        this.log.info(`Triggering Dehumidifier: ${name}`)
+                        try {
+                            await axios.post(
+                                `https://api.smartthings.com/v1/scenes/${scene.sceneId}/execute`,
+                                {},
+                                { headers:{ Authorization:`Bearer ${this.token}` } }
+                            )
+                            this.log.info(`Executed Dehumidifier scene: ${name}`)
+                        } catch (err) {
+                            this.log.error(`Error executing Dehumidifier: ${name}`, err)
+                            throw new this.api.hap.HapStatusError(
+                                this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
+                            )
+                        } finally {
                             svc.updateCharacteristic(
                                 Characteristic.Active,
                                 Characteristic.Active.INACTIVE
                             )
                         }
-                    })
-            }
-            else {
-                // ─── Switch ───
-                svc      = new Service.Switch(name)
-                category = this.api.hap.Categories.SWITCH
-                svc.setCharacteristic(Characteristic.ConfiguredName, name)
+                    }
+                })
 
-                svc.getCharacteristic(Characteristic.On)
-                    .onGet(() => false)
-                    .onSet(async (value) => {
-                        this.log.info(`Switch onSet called (${name}):`, value)
-                        if (value) {
-                            try {
-                                await axios.post(
-                                    `https://api.smartthings.com/v1/scenes/${scene.sceneId}/execute`,
-                                    {},
-                                    { headers:{ Authorization:`Bearer ${this.token}` } }
-                                )
-                                this.log.info(`Executed Switch scene: ${name}`)
-                            } catch (err) {
-                                this.log.error(`Error executing Switch scene: ${name}`, err)
-                            }
-                            svc.updateCharacteristic(Characteristic.On, false)
-                        }
-                    })
-            }
-
-            const acc = new this.api.platformAccessory(
-                name,
-                uuid.generate(scene.sceneId)
-            )
-            acc.category = category
             acc.addService(svc)
-            return acc
-        })
+            accessories.push(acc)
+        }
 
-        // remove old
-        const toRemove = this.cachedAccessories.filter(cached =>
-            !accessories.find(acc => acc.UUID === cached.UUID)
+        // 5) unregister old & register new
+        const toRemove = this.cachedAccessories.filter(c =>
+            !accessories.find(a => a.UUID === c.UUID)
         )
         if (toRemove.length) {
             this.api.unregisterPlatformAccessories(
@@ -154,13 +154,11 @@ class StRoutinePlatform {
                 toRemove
             )
         }
-
-        // register new
         this.api.registerPlatformAccessories(
             'homebridge-smartthings-routine',
             'StRoutinePlatform',
             accessories
         )
-        this.log.info(`Registered ${accessories.length} SmartThings routines`)
+        this.log.info(`Registered ${accessories.length} accessories`)
     }
 }

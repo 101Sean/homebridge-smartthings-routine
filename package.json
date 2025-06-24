@@ -1,6 +1,6 @@
 {
   "name":        "homebridge-smartthings-routine",
-  "version":     "1.0.11",
+  "version":     "1.0.12",
   "main":        "index.js",
   "engines":     { "homebridge": ">=1.0.0" },
   "keywords":    ["homebridge-plugin","accessory","smartthings","television"],
