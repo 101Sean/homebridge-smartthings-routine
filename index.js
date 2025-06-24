@@ -8,11 +8,10 @@ module.exports = (api) => {
     Characteristic = api.hap.Characteristic
     uuid           = api.hap.uuid
 
-    // dynamic=true 제거 → 메인 프로세스에서 실행
     api.registerPlatform(
-        'homebridge-smartthings-routine',  // package.json name
-        'StRoutinePlatform',               // platform identifier
-        StRoutinePlatform                  // dynamic 인자 없음
+        'homebridge-smartthings-routine',
+        'StRoutinePlatform',
+        StRoutinePlatform
     )
 }
 
@@ -22,17 +21,12 @@ class StRoutinePlatform {
         this.token = config.token
         this.api   = api
 
-        if (!this.token) {
-            throw new Error('token is required')
-        }
-
-        // configureAccessory 로 처음 주입된 캐시, 다 등록 후 호출
+        if (!this.token) throw new Error('token is required')
         this.cachedAccessories = []
         this.api.on('didFinishLaunching', () => this.initAccessories())
     }
 
     configureAccessory(accessory) {
-        // Homebridge 재시작 시 기존 액세서리 캐시
         this.cachedAccessories.push(accessory)
     }
 
@@ -49,80 +43,113 @@ class StRoutinePlatform {
             return
         }
 
-        // 새로 등록할 액세서리 목록
         const accessories = scenes.map(scene => {
             const name     = (scene.sceneName||'').trim() || scene.sceneId
             const iconCode = String(scene.sceneIcon)
 
-            // 서비스·카테고리 결정
             let svc, category
+
+            // 1) TV 전원: Television 서비스
             if (iconCode === '204') {
                 svc      = new Service.Television(name)
                 category = this.api.hap.Categories.TELEVISION
+
+                // 필수 특성: ConfiguredName, SleepDiscoveryMode
                 svc.setCharacteristic(Characteristic.ConfiguredName, name)
                     .setCharacteristic(
                         Characteristic.SleepDiscoveryMode,
                         Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
                     )
+
+                // 필수 ActiveIdentifier
+                svc.getCharacteristic(Characteristic.ActiveIdentifier)
+                    .setProps({ minValue:1, maxValue:1, validValues:[1] })
+                    .onGet(() => 1)
+
+                // 더미 InputSource 하나 링크
+                const input = new Service.InputSource(`${name} Input`, uuid.generate(`${scene.sceneId}-inp`))
+                input
+                    .setCharacteristic(Characteristic.Identifier,             1)
+                    .setCharacteristic(Characteristic.ConfiguredName,         name)
+                    .setCharacteristic(Characteristic.IsConfigured,           Characteristic.IsConfigured.CONFIGURED)
+                    .setCharacteristic(Characteristic.InputSourceType,        Characteristic.InputSourceType.HDMI)
+                    .setCharacteristic(Characteristic.CurrentVisibilityState, Characteristic.CurrentVisibilityState.SHOWN)
+                svc.addLinkedService(input)
+
+                // 전원 토글만
+                svc.getCharacteristic(Characteristic.Active)
+                    .onGet(() => Characteristic.Active.INACTIVE)
+                    .onSet(async (v, cb) => {
+                        if (v === Characteristic.Active.ACTIVE) {
+                            try {
+                                await axios.post(
+                                    `https://api.smartthings.com/v1/scenes/${scene.sceneId}/execute`, {},
+                                    { headers:{Authorization:`Bearer ${this.token}`}}
+                                )
+                                this.log.info(`Executed TV scene: ${name}`)
+                            } catch (err) {
+                                this.log.error(err)
+                                return cb(new Error('SERVICE_COMMUNICATION_FAILURE'))
+                            } finally {
+                                svc.updateCharacteristic(Characteristic.Active, Characteristic.Active.INACTIVE)
+                            }
+                        }
+                        cb()
+                    })
             }
-            else if (iconCode === '211') {
-                svc      = new Service.Fan(name)
-                category = this.api.hap.Categories.FAN
-                svc.setCharacteristic(Characteristic.ConfiguredName, name)
+            // 2) 에어컨·제습: StatelessProgrammableSwitch(단일 버튼)
+            else if (iconCode === '211' || iconCode === '212') {
+                svc      = new Service.StatelessProgrammableSwitch(name)
+                category = this.api.hap.Categories.SWITCH
+
+                svc.getCharacteristic(Characteristic.ProgrammableSwitchEvent)
+                    .onSet(async (_, cb) => {
+                        try {
+                            await axios.post(
+                                `https://api.smartthings.com/v1/scenes/${scene.sceneId}/execute`,{},
+                                { headers:{Authorization:`Bearer ${this.token}`}}
+                            )
+                            this.log.info(`Executed button scene: ${name}`)
+                        } catch (err) {
+                            this.log.error(err)
+                        }
+                        // 이벤트는 자동 리셋
+                        cb()
+                    })
             }
-            else if (iconCode === '212') {
-                svc      = new Service.HumidifierDehumidifier(name)
-                category = this.api.hap.Categories.HUMIDIFIERDEHUMIDIFIER
-                svc.setCharacteristic(Characteristic.ConfiguredName, name)
-            }
+            // 3) 나머지 씬: 일반 Switch
             else {
                 svc      = new Service.Switch(name)
                 category = this.api.hap.Categories.SWITCH
-                svc.setCharacteristic(Characteristic.ConfiguredName, name)
+
+                svc.getCharacteristic(Characteristic.On)
+                    .onGet(() => false)
+                    .onSet(async (v, cb) => {
+                        if (v) {
+                            try {
+                                await axios.post(
+                                    `https://api.smartthings.com/v1/scenes/${scene.sceneId}/execute`,{},
+                                    { headers:{Authorization:`Bearer ${this.token}`}}
+                                )
+                                this.log.info(`Executed switch scene: ${name}`)
+                            } catch (err) {
+                                this.log.error(err)
+                            } finally {
+                                svc.updateCharacteristic(Characteristic.On, false)
+                            }
+                        }
+                        cb()
+                    })
             }
 
-            // 단일 전원 토글만
-            const isOnOff  = svc instanceof Service.Switch || svc instanceof Service.Fan
-            const charType = isOnOff ? Characteristic.On : Characteristic.Active
-
-            svc.getCharacteristic(charType)
-                .onGet(() => isOnOff ? false : Characteristic.Active.INACTIVE)
-                .onSet(async (v, cb) => {
-                    const trig = isOnOff
-                        ? v === true
-                        : v === Characteristic.Active.ACTIVE
-
-                    if (trig) {
-                        try {
-                            await axios.post(
-                                `https://api.smartthings.com/v1/scenes/${scene.sceneId}/execute`,
-                                {}, { headers: { Authorization: `Bearer ${this.token}` } }
-                            )
-                            this.log.info(`Executed scene: ${name}`)
-                        } catch (err) {
-                            this.log.error(`Error executing ${name}`, err)
-                            return cb(new Error('SERVICE_COMMUNICATION_FAILURE'))
-                        } finally {
-                            svc.updateCharacteristic(
-                                charType,
-                                isOnOff ? false : Characteristic.Active.INACTIVE
-                            )
-                        }
-                    }
-                    cb()
-                })
-
-            // PlatformAccessory 생성
-            const acc = new this.api.platformAccessory(
-                name,
-                uuid.generate(scene.sceneId)
-            )
+            // 4) Accessory 생성 & 서비스 추가
+            const acc = new this.api.platformAccessory(name, uuid.generate(scene.sceneId))
             acc.category = category
             acc.addService(svc)
             return acc
         })
 
-        // 기존 캐시에서 제거된 액세서리는 unregister
+        // 기존 액세서리 정리
         const toRemove = this.cachedAccessories.filter(cached =>
             !accessories.find(acc => acc.UUID === cached.UUID)
         )
