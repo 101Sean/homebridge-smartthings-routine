@@ -1,4 +1,3 @@
-// index.js
 const axios = require('axios')
 
 let Service, Characteristic, uuid
@@ -45,7 +44,8 @@ class StRoutinePlatform {
         const accessories = scenes.map(scene => {
             const name     = (scene.sceneName || '').trim() || scene.sceneId
             const iconCode = String(scene.sceneIcon)
-            // 서비스 타입과 카테고리 결정
+
+            // 1) 서비스·카테고리 결정
             let svc, category
             if (iconCode === '204') {
                 svc      = new Service.Television(name)
@@ -58,34 +58,32 @@ class StRoutinePlatform {
                     )
             }
             else if (iconCode === '211') {
-                svc      = new Service.HeaterCooler(name)
-                category = this.api.hap.Categories.HEATERCOOLER
-                svc
-                    .setCharacteristic(Characteristic.ConfiguredName, name)
+                svc      = new Service.Fan(name)
+                category = this.api.hap.Categories.FAN
+                svc.setCharacteristic(Characteristic.Name, name)
             }
             else if (iconCode === '212') {
                 svc      = new Service.HumidifierDehumidifier(name)
                 category = this.api.hap.Categories.HUMIDIFIERDEHUMIDIFIER
-                svc
-                    .setCharacteristic(Characteristic.ConfiguredName, name)
+                svc.setCharacteristic(Characteristic.ConfiguredName, name)
             }
             else {
-                // 그 외에는 일반 Switch 로 대체
                 svc      = new Service.Switch(name)
                 category = this.api.hap.Categories.SWITCH
             }
 
-            // Active (전원) 토글만 구현
-            svc.getCharacteristic(Characteristic.Active || Characteristic.On)
-                .onGet(() => {
-                    // 항상 OFF 상태로 보여줌
-                    return Characteristic.Active ? Characteristic.Active.INACTIVE : false
-                })
-                .onSet(async (value, cb) => {
-                    if (
-                        (Characteristic.Active && value === Characteristic.Active.ACTIVE) ||
-                        (!Characteristic.Active && value === true)
-                    ) {
+            // 2) 단일 토글(전원) 구현
+            const isOnOff  = svc instanceof Service.Switch || svc instanceof Service.Fan
+            const charType = isOnOff ? Characteristic.On : Characteristic.Active
+
+            svc.getCharacteristic(charType)
+                .onGet(() => isOnOff ? false : Characteristic.Active.INACTIVE)
+                .onSet(async (value, callback) => {
+                    const triggered = isOnOff
+                        ? value === true
+                        : value === Characteristic.Active.ACTIVE
+
+                    if (triggered) {
                         try {
                             await axios.post(
                                 `https://api.smartthings.com/v1/scenes/${scene.sceneId}/execute`,
@@ -95,35 +93,34 @@ class StRoutinePlatform {
                             this.log.info(`Executed scene: ${name}`)
                         } catch (err) {
                             this.log.error(`Error executing ${name}`, err)
-                            return cb(new Error('SERVICE_COMMUNICATION_FAILURE'))
+                            return callback(new Error('SERVICE_COMMUNICATION_FAILURE'))
                         } finally {
-                            // 눌렀다 떼는 버튼처럼 리셋
-                            if (Characteristic.Active) {
-                                svc.updateCharacteristic(
-                                    Characteristic.Active,
-                                    Characteristic.Active.INACTIVE
-                                )
-                            } else {
-                                svc.updateCharacteristic(Characteristic.On, false)
-                            }
+                            svc.updateCharacteristic(
+                                charType,
+                                isOnOff ? false : Characteristic.Active.INACTIVE
+                            )
                         }
                     }
-                    cb()
+                    callback()
                 })
 
-            // 액세서리 인스턴스 생성 & 서비스 추가
-            const acc = new this.api.platformAccessory(name, uuid.generate(scene.sceneId))
+            // 3) 액세서리 생성 & 서비스 연결
+            const acc = new this.api.platformAccessory(
+                name,
+                uuid.generate(scene.sceneId)
+            )
             acc.category = category
             acc.addService(svc)
+
             return acc
         })
 
-        // HomeKit에 모두 노출
+        // 4) HomeKit에 모두 게시
         this.api.publishExternalAccessories(
             'homebridge-smartthings-routine',
             accessories
         )
-        this.log.info(`Published ${accessories.length} routines with appropriate icons`)
+        this.log.info(`Published ${accessories.length} SmartThings routines`)
     }
 
     configureAccessory() {}  // no-op
