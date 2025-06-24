@@ -1,33 +1,39 @@
 // index.js
 const axios = require('axios')
 
-let Service, Characteristic, Bridge, Accessory, uuid
+let Service, Characteristic, uuid
 
 module.exports = (api) => {
     Service        = api.hap.Service
     Characteristic = api.hap.Characteristic
-    Bridge         = api.hap.Bridge
-    Accessory      = api.hap.Accessory       // 👈 hap.Accessory 사용
     uuid           = api.hap.uuid
 
+    // dynamic=true 제거 → 메인 프로세스에서 실행
     api.registerPlatform(
-        'homebridge-smartthings-routine',     // package.json name
-        'StRoutinePlatform',                  // 플랫폼 식별자
-        StRoutinePlatform,
-        true
+        'homebridge-smartthings-routine',  // package.json name
+        'StRoutinePlatform',               // platform identifier
+        StRoutinePlatform                  // dynamic 인자 없음
     )
 }
 
 class StRoutinePlatform {
     constructor(log, config, api) {
         this.log   = log
-        this.name  = config.name  || 'SmartThings Routines'
         this.token = config.token
         this.api   = api
 
-        if (!this.token) throw new Error('token is required')
+        if (!this.token) {
+            throw new Error('token is required')
+        }
 
+        // configureAccessory 로 처음 주입된 캐시, 다 등록 후 호출
+        this.cachedAccessories = []
         this.api.on('didFinishLaunching', () => this.initAccessories())
+    }
+
+    configureAccessory(accessory) {
+        // Homebridge 재시작 시 기존 액세서리 캐시
+        this.cachedAccessories.push(accessory)
     }
 
     async initAccessories() {
@@ -43,18 +49,12 @@ class StRoutinePlatform {
             return
         }
 
-        // 1) child Bridge 생성
-        const bridgeUUID  = uuid.generate(this.name)
-        const childBridge = new Bridge(this.name, bridgeUUID)
-        childBridge.getService(Service.AccessoryInformation)
-            .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
-            .setCharacteristic(Characteristic.Model,        'RoutineBridge')
-
-        // 2) 각 scene → TV / Fan / Dehumidifier / Switch 액세서리로 추가
-        scenes.forEach(scene => {
+        // 새로 등록할 액세서리 목록
+        const accessories = scenes.map(scene => {
             const name     = (scene.sceneName||'').trim() || scene.sceneId
             const iconCode = String(scene.sceneIcon)
 
+            // 서비스·카테고리 결정
             let svc, category
             if (iconCode === '204') {
                 svc      = new Service.Television(name)
@@ -81,7 +81,7 @@ class StRoutinePlatform {
                 svc.setCharacteristic(Characteristic.ConfiguredName, name)
             }
 
-            // 단일 전원 토글
+            // 단일 전원 토글만
             const isOnOff  = svc instanceof Service.Switch || svc instanceof Service.Fan
             const charType = isOnOff ? Characteristic.On : Characteristic.Active
 
@@ -112,20 +112,34 @@ class StRoutinePlatform {
                     cb()
                 })
 
-            // hap.Accessory 인스턴스로 생성 → linkAccessory 에러 없음
-            const acc = new Accessory(name, uuid.generate(scene.sceneId))
+            // PlatformAccessory 생성
+            const acc = new this.api.platformAccessory(
+                name,
+                uuid.generate(scene.sceneId)
+            )
             acc.category = category
             acc.addService(svc)
-            childBridge.addBridgedAccessory(acc)
+            return acc
         })
 
-        // 3) child Bridge 게시
-        this.api.publishExternalAccessories(
-            'homebridge-smartthings-routine',
-            [ childBridge ]
+        // 기존 캐시에서 제거된 액세서리는 unregister
+        const toRemove = this.cachedAccessories.filter(cached =>
+            !accessories.find(acc => acc.UUID === cached.UUID)
         )
-        this.log.info(`Published child bridge "${this.name}" with ${scenes.length} routines`)
-    }
+        if (toRemove.length) {
+            this.api.unregisterPlatformAccessories(
+                'homebridge-smartthings-routine',
+                'StRoutinePlatform',
+                toRemove
+            )
+        }
 
-    configureAccessory() {}  // no-op
+        // 새로운 액세서리 등록
+        this.api.registerPlatformAccessories(
+            'homebridge-smartthings-routine',
+            'StRoutinePlatform',
+            accessories
+        )
+        this.log.info(`Registered ${accessories.length} SmartThings routines`)
+    }
 }
