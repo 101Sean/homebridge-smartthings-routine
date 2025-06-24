@@ -100,11 +100,11 @@ class StRoutinePlatform {
             accessories.push(acc)
         }
 
-        // 4) 제습기(212) 씬 그대로
+        // 4) 제습기(212) 씬 처리
         const dehumScenes = scenes.filter(s => String(s.sceneIcon) === '212')
         for (const scene of dehumScenes) {
             const name = scene.sceneName
-            const acc = new this.api.platformAccessory(
+            const acc  = new this.api.platformAccessory(
                 name,
                 uuid.generate(scene.sceneId)
             )
@@ -116,13 +116,14 @@ class StRoutinePlatform {
             svc.getCharacteristic(Characteristic.Active)
                 .onGet(() => Characteristic.Active.INACTIVE)
                 .onSet(async (value) => {
+                    this.log.info(`Dehumidifier onSet (${name}):`, value)
+
                     if (value === Characteristic.Active.ACTIVE) {
-                        this.log.info(`Triggering Dehumidifier: ${name}`)
+                        // -- 기존 제습운전 씬 실행 --
                         try {
                             await axios.post(
                                 `https://api.smartthings.com/v1/scenes/${scene.sceneId}/execute`,
-                                {},
-                                { headers:{ Authorization:`Bearer ${this.token}` } }
+                                {}, { headers: { Authorization: `Bearer ${this.token}` } }
                             )
                             this.log.info(`Executed Dehumidifier scene: ${name}`)
                         } catch (err) {
@@ -131,10 +132,27 @@ class StRoutinePlatform {
                                 this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
                             )
                         } finally {
+                            // 자동으로 Inactive로 리셋
                             svc.updateCharacteristic(
                                 Characteristic.Active,
                                 Characteristic.Active.INACTIVE
                             )
+                        }
+                    } else {
+                        // -- 추가: value가 INACTIVE로 들어올 때 에어컨 Off 씬 실행 --
+                        if (offScene) {
+                            try {
+                                await axios.post(
+                                    `https://api.smartthings.com/v1/scenes/${offScene.sceneId}/execute`,
+                                    {}, { headers: { Authorization: `Bearer ${this.token}` } }
+                                )
+                                this.log.info(`Executed AC Off scene: ${offScene.sceneName}`)
+                            } catch (err) {
+                                this.log.error(`Error executing AC Off scene: ${offScene.sceneName}`, err)
+                                throw new this.api.hap.HapStatusError(
+                                    this.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE
+                                )
+                            }
                         }
                     }
                 })
