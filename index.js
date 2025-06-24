@@ -44,6 +44,8 @@ class StRoutinePlatform {
             return
         }
 
+        scenes = scenes.filter(scene => String(scene.sceneIcon) !== '204')
+
         const accessories = scenes.map(scene => {
             const name     = (scene.sceneName || '').trim() || scene.sceneId
             const iconCode = String(scene.sceneIcon)
@@ -108,9 +110,6 @@ class StRoutinePlatform {
                         }
                         cb()
                     })
-            }
-            else if (iconCode === '204') {
-                //tv 삭제
             }
             // ─── 기본 Switch ───
             else {
