@@ -1,15 +1,18 @@
+// index.js
 const axios = require('axios')
 
-let Service, Characteristic, uuid
+let Service, Characteristic, Bridge, Accessory, uuid
 
 module.exports = (api) => {
     Service        = api.hap.Service
     Characteristic = api.hap.Characteristic
+    Bridge         = api.hap.Bridge
+    Accessory      = api.hap.Accessory       // 👈 hap.Accessory 사용
     uuid           = api.hap.uuid
 
     api.registerPlatform(
-        'homebridge-smartthings-routine',
-        'StRoutinePlatform',
+        'homebridge-smartthings-routine',     // package.json name
+        'StRoutinePlatform',                  // 플랫폼 식별자
         StRoutinePlatform,
         true
     )
@@ -18,12 +21,11 @@ module.exports = (api) => {
 class StRoutinePlatform {
     constructor(log, config, api) {
         this.log   = log
+        this.name  = config.name  || 'SmartThings Routines'
         this.token = config.token
         this.api   = api
 
-        if (!this.token) {
-            throw new Error('token is required')
-        }
+        if (!this.token) throw new Error('token is required')
 
         this.api.on('didFinishLaunching', () => this.initAccessories())
     }
@@ -41,17 +43,23 @@ class StRoutinePlatform {
             return
         }
 
-        const accessories = scenes.map(scene => {
-            const name     = (scene.sceneName || '').trim() || scene.sceneId
+        // 1) child Bridge 생성
+        const bridgeUUID  = uuid.generate(this.name)
+        const childBridge = new Bridge(this.name, bridgeUUID)
+        childBridge.getService(Service.AccessoryInformation)
+            .setCharacteristic(Characteristic.Manufacturer, 'SmartThings')
+            .setCharacteristic(Characteristic.Model,        'RoutineBridge')
+
+        // 2) 각 scene → TV / Fan / Dehumidifier / Switch 액세서리로 추가
+        scenes.forEach(scene => {
+            const name     = (scene.sceneName||'').trim() || scene.sceneId
             const iconCode = String(scene.sceneIcon)
 
-            // 1) 서비스·카테고리 결정
             let svc, category
             if (iconCode === '204') {
                 svc      = new Service.Television(name)
                 category = this.api.hap.Categories.TELEVISION
-                svc
-                    .setCharacteristic(Characteristic.ConfiguredName, name)
+                svc.setCharacteristic(Characteristic.ConfiguredName, name)
                     .setCharacteristic(
                         Characteristic.SleepDiscoveryMode,
                         Characteristic.SleepDiscoveryMode.ALWAYS_DISCOVERABLE
@@ -60,7 +68,7 @@ class StRoutinePlatform {
             else if (iconCode === '211') {
                 svc      = new Service.Fan(name)
                 category = this.api.hap.Categories.FAN
-                svc.setCharacteristic(Characteristic.Name, name)
+                svc.setCharacteristic(Characteristic.ConfiguredName, name)
             }
             else if (iconCode === '212') {
                 svc      = new Service.HumidifierDehumidifier(name)
@@ -70,30 +78,30 @@ class StRoutinePlatform {
             else {
                 svc      = new Service.Switch(name)
                 category = this.api.hap.Categories.SWITCH
+                svc.setCharacteristic(Characteristic.ConfiguredName, name)
             }
 
-            // 2) 단일 토글(전원) 구현
+            // 단일 전원 토글
             const isOnOff  = svc instanceof Service.Switch || svc instanceof Service.Fan
             const charType = isOnOff ? Characteristic.On : Characteristic.Active
 
             svc.getCharacteristic(charType)
                 .onGet(() => isOnOff ? false : Characteristic.Active.INACTIVE)
-                .onSet(async (value, callback) => {
-                    const triggered = isOnOff
-                        ? value === true
-                        : value === Characteristic.Active.ACTIVE
+                .onSet(async (v, cb) => {
+                    const trig = isOnOff
+                        ? v === true
+                        : v === Characteristic.Active.ACTIVE
 
-                    if (triggered) {
+                    if (trig) {
                         try {
                             await axios.post(
                                 `https://api.smartthings.com/v1/scenes/${scene.sceneId}/execute`,
-                                {},
-                                { headers: { Authorization: `Bearer ${this.token}` } }
+                                {}, { headers: { Authorization: `Bearer ${this.token}` } }
                             )
                             this.log.info(`Executed scene: ${name}`)
                         } catch (err) {
                             this.log.error(`Error executing ${name}`, err)
-                            return callback(new Error('SERVICE_COMMUNICATION_FAILURE'))
+                            return cb(new Error('SERVICE_COMMUNICATION_FAILURE'))
                         } finally {
                             svc.updateCharacteristic(
                                 charType,
@@ -101,26 +109,22 @@ class StRoutinePlatform {
                             )
                         }
                     }
-                    callback()
+                    cb()
                 })
 
-            // 3) 액세서리 생성 & 서비스 연결
-            const acc = new this.api.platformAccessory(
-                name,
-                uuid.generate(scene.sceneId)
-            )
+            // hap.Accessory 인스턴스로 생성 → linkAccessory 에러 없음
+            const acc = new Accessory(name, uuid.generate(scene.sceneId))
             acc.category = category
             acc.addService(svc)
-
-            return acc
+            childBridge.addBridgedAccessory(acc)
         })
 
-        // 4) HomeKit에 모두 게시
+        // 3) child Bridge 게시
         this.api.publishExternalAccessories(
             'homebridge-smartthings-routine',
-            accessories
+            [ childBridge ]
         )
-        this.log.info(`Published ${accessories.length} SmartThings routines`)
+        this.log.info(`Published child bridge "${this.name}" with ${scenes.length} routines`)
     }
 
     configureAccessory() {}  // no-op
